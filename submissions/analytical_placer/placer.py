@@ -1,15 +1,22 @@
 """
-Analytical global placer: LSE-HPWL + density + RUDY congestion surrogate
-Optimization: Adam gradient descent → greedy spiral legalization
+Analytical global placer: LSE-HPWL + density + L-route congestion surrogate
+Optimization: Adam gradient descent → greedy spiral legalization → SA refinement
 
 Pin resolution (from net_pin_nodes col0 = owner index):
   [0, num_hard)           hard macro → placement[owner] + macro_pin_offsets[owner][slot]
   [num_hard, num_macro)   soft macro → placement[owner] (center, slot always 0)
   [num_macro, ...)        I/O port   → port_positions[owner - num_macro] (fixed)
+
+Congestion surrogate: L-route (not RUDY).
+  RUDY spreads demand over bbox AREA → gradient opposes competition (longer L-routes).
+  L-route traces H+V segments → gradient correctly pushes pins closer.
+  See findings.md section T for full formula derivation.
 """
 from __future__ import annotations
 
 import math
+import random
+import time
 import torch
 import torch.nn.functional as F
 
@@ -25,13 +32,16 @@ def _preprocess(b: Benchmark, device: torch.device) -> dict:
     Convert all variable-length lists into flat packed tensors for scatter ops.
 
     Returns dict with:
-      pin_net_idx      [total_pins] int64  — which net each pin belongs to
-      pin_owner        [total_pins] int64  — owner index (macro or port)
-      pin_is_hard      [total_pins] bool   — True if hard macro pin
-      pin_is_port      [total_pins] bool   — True if I/O port
-      hard_offsets     [total_hard_pins, 2] float32 — stacked macro_pin_offsets
-      hard_pin_flat_idx [total_pins] int64 — index into hard_offsets (0 for non-hard)
-      num_nets         int
+      pin_net_idx       [total_pins] int64  — which net each pin belongs to
+      pin_owner         [total_pins] int64  — owner index (macro or port)
+      pin_is_hard       [total_pins] bool   — True if hard macro pin
+      pin_is_port       [total_pins] bool   — True if I/O port
+      hard_offsets      [total_hard_pins, 2] float32 — stacked macro_pin_offsets
+      hard_pin_flat_idx [total_pins] int64  — index into hard_offsets (0 for non-hard)
+      num_nets          int
+      edge_src_idx      [num_edges] int64   — flat pin index for source pin per edge
+      edge_snk_idx      [num_edges] int64   — flat pin index for sink pin per edge
+      edge_weights      [num_edges] float32 — net weight for each 2-pin edge
     """
     num_hard = b.num_hard_macros
     num_macro = b.num_macros
@@ -52,8 +62,13 @@ def _preprocess(b: Benchmark, device: torch.device) -> dict:
         if offset_list else torch.zeros(0, 2, device=device)
     )
 
-    # Flatten net_pin_nodes into parallel arrays
+    # Flatten net_pin_nodes into parallel arrays + build 2-pin star edges
     all_net_idx, all_owner, all_slot = [], [], []
+    edge_src_flat: list[int] = []
+    edge_snk_flat: list[int] = []
+    edge_weights_list: list[float] = []
+    flat_offset = 0
+
     for net_i, pins in enumerate(b.net_pin_nodes):
         n = pins.shape[0]
         if n == 0:
@@ -61,6 +76,17 @@ def _preprocess(b: Benchmark, device: torch.device) -> dict:
         all_net_idx.append(torch.full((n,), net_i, dtype=torch.long))
         all_owner.append(pins[:, 0])
         all_slot.append(pins[:, 1])
+
+        # Star decomposition: pin[0] = source, pins[1..N-1] = sinks
+        # Each (source, sink_j) pair becomes a 2-pin edge for L-route
+        if n >= 2:
+            w = float(b.net_weights[net_i].item())
+            for j in range(1, n):
+                edge_src_flat.append(flat_offset)      # index of source pin in pin_xy
+                edge_snk_flat.append(flat_offset + j)  # index of sink pin in pin_xy
+                edge_weights_list.append(w)
+
+        flat_offset += n
 
     pin_net_idx = torch.cat(all_net_idx).to(device)   # [total_pins]
     pin_owner   = torch.cat(all_owner).to(device)     # [total_pins]
@@ -70,7 +96,6 @@ def _preprocess(b: Benchmark, device: torch.device) -> dict:
     pin_is_port = pin_owner >= num_macro
 
     # For hard pins: compute absolute index into hard_offsets tensor.
-    # This Python loop runs once at startup; ~1s for ibm17's ~200k pins.
     total_pins = len(pin_net_idx)
     hard_pin_flat_idx = torch.zeros(total_pins, dtype=torch.long)
     pin_owner_cpu = pin_owner.cpu()
@@ -83,6 +108,16 @@ def _preprocess(b: Benchmark, device: torch.device) -> dict:
             hard_pin_flat_idx[k] = per_hard_offset_start[owner_k] + slot_k
     hard_pin_flat_idx = hard_pin_flat_idx.to(device)
 
+    # Convert edge lists to tensors
+    if edge_src_flat:
+        edge_src_idx  = torch.tensor(edge_src_flat,     dtype=torch.long,    device=device)
+        edge_snk_idx  = torch.tensor(edge_snk_flat,     dtype=torch.long,    device=device)
+        edge_weights  = torch.tensor(edge_weights_list, dtype=torch.float32, device=device)
+    else:
+        edge_src_idx = torch.zeros(0, dtype=torch.long,    device=device)
+        edge_snk_idx = torch.zeros(0, dtype=torch.long,    device=device)
+        edge_weights = torch.zeros(0, dtype=torch.float32, device=device)
+
     return dict(
         pin_net_idx=pin_net_idx,
         pin_owner=pin_owner,
@@ -91,6 +126,9 @@ def _preprocess(b: Benchmark, device: torch.device) -> dict:
         hard_offsets=hard_offsets,
         hard_pin_flat_idx=hard_pin_flat_idx,
         num_nets=b.num_nets,
+        edge_src_idx=edge_src_idx,
+        edge_snk_idx=edge_snk_idx,
+        edge_weights=edge_weights,
     )
 
 
@@ -113,25 +151,20 @@ def _compute_pin_xy(
     is_hard = data["pin_is_hard"]      # [total_pins] bool
     is_port = data["pin_is_port"]      # [total_pins] bool
 
-    # Start with owner macro center (valid for soft macros; overridden for hard/port)
     clamped_owner = owner.clamp(0, num_macro - 1)
     pin_xy = pos[clamped_owner]        # [total_pins, 2]
 
-    # Hard macro pins: add offset (offset is 0 for non-hard, masked by is_hard)
     if is_hard.any():
-        hard_flat = data["hard_pin_flat_idx"]    # [total_pins]
-        offsets   = data["hard_offsets"]         # [total_hard_pins, 2]
-        # For pins where hard_offsets is empty, hard_flat will be 0 but
-        # is_hard ensures the offset only applies to real hard pins.
+        hard_flat = data["hard_pin_flat_idx"]
+        offsets   = data["hard_offsets"]
         if offsets.shape[0] > 0:
-            offset_xy = offsets[hard_flat]       # [total_pins, 2]
+            offset_xy = offsets[hard_flat]
             pin_xy = pin_xy + offset_xy * is_hard.unsqueeze(1).float()
 
-    # I/O ports: replace with fixed port position (no gradient from ports)
     if is_port.any() and port_pos.shape[0] > 0:
-        port_owner_idx = (owner - num_macro).clamp(min=0)   # [total_pins]
+        port_owner_idx = (owner - num_macro).clamp(min=0)
         port_owner_idx = port_owner_idx.clamp(max=port_pos.shape[0] - 1)
-        port_xy = port_pos[port_owner_idx]                   # [total_pins, 2]
+        port_xy = port_pos[port_owner_idx]
         pin_xy = torch.where(is_port.unsqueeze(1), port_xy, pin_xy)
 
     return pin_xy
@@ -157,13 +190,10 @@ def lse_hpwl_loss(
     b: Benchmark,
     alpha: float,
 ) -> torch.Tensor:
-    """
-    Differentiable HPWL via log-sum-exp. Returns normalized scalar.
-    As alpha → ∞, this converges to true HPWL.
-    """
-    net_idx  = data["pin_net_idx"]    # [total_pins]
+    """Differentiable HPWL via log-sum-exp. Returns normalized scalar."""
+    net_idx  = data["pin_net_idx"]
     num_nets = data["num_nets"]
-    weights  = b.net_weights.to(pin_xy.device)   # [num_nets]
+    weights  = b.net_weights.to(pin_xy.device)
 
     x = pin_xy[:, 0]
     y = pin_xy[:, 1]
@@ -173,8 +203,7 @@ def lse_hpwl_loss(
     lse_y_max =  _scatter_lse( y, net_idx, num_nets, alpha)
     lse_y_min = -_scatter_lse(-y, net_idx, num_nets, alpha)
 
-    hpwl_per_net = (lse_x_max - lse_x_min) + (lse_y_max - lse_y_min)  # [num_nets]
-
+    hpwl_per_net = (lse_x_max - lse_x_min) + (lse_y_max - lse_y_min)
     norm = (b.canvas_width + b.canvas_height) * num_nets
     return (weights * hpwl_per_net).sum() / norm
 
@@ -190,16 +219,16 @@ def _make_cell_centers(b: Benchmark, device: torch.device):
     ch = b.canvas_height / rows
     col_c = (torch.arange(cols, device=device, dtype=torch.float32) + 0.5) * cw
     row_c = (torch.arange(rows, device=device, dtype=torch.float32) + 0.5) * ch
-    grid_y, grid_x = torch.meshgrid(row_c, col_c, indexing="ij")   # [rows, cols]
+    grid_y, grid_x = torch.meshgrid(row_c, col_c, indexing="ij")
     cell_centers = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=1)  # [G, 2]
     return cell_centers, torch.tensor([cw, ch], dtype=torch.float32, device=device)
 
 
 def density_loss(
-    pos: torch.Tensor,           # [N, 2] macro centers (grad-tracked)
-    sizes: torch.Tensor,         # [N, 2] macro (w, h) — NOT grad-tracked
-    cell_centers: torch.Tensor,  # [G, 2]
-    cell_size: torch.Tensor,     # [2] = (cw, ch)
+    pos: torch.Tensor,
+    sizes: torch.Tensor,
+    cell_centers: torch.Tensor,
+    cell_size: torch.Tensor,
     b: Benchmark,
     target_density: float = 1.0,
     chunk_size: int = 256,
@@ -207,7 +236,6 @@ def density_loss(
     """
     Differentiable density penalty using exact rectangle overlap.
     cell_density[g] = sum_i (overlap_area(macro_i, cell_g)) / cell_area.
-    Processes macros in chunks to bound GPU memory.
     """
     N = pos.shape[0]
     G = cell_centers.shape[0]
@@ -215,25 +243,24 @@ def density_loss(
     half_ch = cell_size[1] / 2
     cell_area = cell_size[0] * cell_size[1]
 
-    gx = cell_centers[:, 0]  # [G]
-    gy = cell_centers[:, 1]  # [G]
+    gx = cell_centers[:, 0]
+    gy = cell_centers[:, 1]
 
     cell_density = torch.zeros(G, dtype=pos.dtype, device=pos.device)
 
     for start in range(0, N, chunk_size):
         end = min(start + chunk_size, N)
-        cx = pos[start:end, 0:1]            # [C, 1]
-        cy = pos[start:end, 1:2]            # [C, 1]
-        hw = sizes[start:end, 0:1] / 2     # [C, 1]
-        hh = sizes[start:end, 1:2] / 2     # [C, 1]
+        cx = pos[start:end, 0:1]
+        cy = pos[start:end, 1:2]
+        hw = sizes[start:end, 0:1] / 2
+        hh = sizes[start:end, 1:2] / 2
 
-        # True axis-aligned rectangle overlap: [C, G]
-        lo_x = torch.maximum(cx - hw, gx - half_cw)   # [C, G]
+        lo_x = torch.maximum(cx - hw, gx - half_cw)
         hi_x = torch.minimum(cx + hw, gx + half_cw)
         lo_y = torch.maximum(cy - hh, gy - half_ch)
         hi_y = torch.minimum(cy + hh, gy + half_ch)
 
-        overlap_area = F.relu(hi_x - lo_x) * F.relu(hi_y - lo_y)  # [C, G]
+        overlap_area = F.relu(hi_x - lo_x) * F.relu(hi_y - lo_y)
         cell_density = cell_density + overlap_area.sum(dim=0) / cell_area
 
     overflow = F.relu(cell_density - target_density)
@@ -241,173 +268,285 @@ def density_loss(
 
 
 # ---------------------------------------------------------------------------
-# Direct macro-pair overlap penalty (catches small overlaps missed by cell density)
+# Direct macro-pair overlap penalty
 # ---------------------------------------------------------------------------
 
 def macro_overlap_loss(
-    pos: torch.Tensor,      # [num_macros, 2]
-    sizes: torch.Tensor,    # [num_macros, 2]
+    pos: torch.Tensor,
+    sizes: torch.Tensor,
     num_hard: int,
     gap: float = 0.02,
 ) -> torch.Tensor:
-    """
-    Penalizes pairwise overlap between hard macros. O(N²) but N≈300 max.
-    Returns total overlap area (scalar).
-    """
-    x  = pos[:num_hard, 0]   # [N]
+    """Penalizes pairwise overlap between hard macros. O(N²) but N≈300 max."""
+    x  = pos[:num_hard, 0]
     y  = pos[:num_hard, 1]
-    hw = sizes[:num_hard, 0] / 2 + gap / 2  # [N] half-width + gap/2
+    hw = sizes[:num_hard, 0] / 2 + gap / 2
     hh = sizes[:num_hard, 1] / 2 + gap / 2
 
-    # Pairwise penetration [N, N]
-    dx = (x.unsqueeze(0) - x.unsqueeze(1)).abs()   # [N, N]
+    dx = (x.unsqueeze(0) - x.unsqueeze(1)).abs()
     dy = (y.unsqueeze(0) - y.unsqueeze(1)).abs()
     px = F.relu(hw.unsqueeze(0) + hw.unsqueeze(1) - dx)
     py = F.relu(hh.unsqueeze(0) + hh.unsqueeze(1) - dy)
 
-    # Overlap area per pair: min(px, py) selects the smaller axis
-    overlap = torch.minimum(px, py) * (px > 0).float() * (py > 0).float()  # [N, N]
-
-    # Upper triangle only (avoid double-counting), zero diagonal
+    overlap = torch.minimum(px, py) * (px > 0).float() * (py > 0).float()
     mask = torch.triu(torch.ones(num_hard, num_hard, device=pos.device, dtype=torch.bool), diagonal=1)
     return overlap[mask].sum()
 
 
 # ---------------------------------------------------------------------------
-# RUDY congestion surrogate (Rectangular Uniform wire DensitY)
+# RUDY congestion surrogate (kept for reference; NOT used in gradient loop)
 # ---------------------------------------------------------------------------
 
 def rudy_congestion_loss(
-    pin_xy: torch.Tensor,   # [total_pins, 2] — differentiable pin world coords
-    data: dict,             # from _preprocess()
+    pin_xy: torch.Tensor,
+    data: dict,
     b: Benchmark,
     device: torch.device,
 ) -> torch.Tensor:
     """
-    RUDY differentiable congestion surrogate. Returns scalar ≈ competition
-    congestion_cost (top-5% mean routing utilization).
+    RUDY differentiable congestion surrogate (bbox-uniform demand distribution).
 
-    Core idea: for each net, distribute net_weight / bbox_area uniformly over
-    all grid cells overlapping its bounding box. Cells that many nets route
-    through accumulate high demand → congestion hotspot.
+    NOT used in the main gradient loop because RUDY's gradient OPPOSES the
+    competition's L-route gradient for already-spread placements:
+    - RUDY rewards larger bboxes (lower per-cell demand) → pushes macros apart
+    - L-route penalizes longer wires (more edge crossings) → pulls macros closer
 
-    Differentiable because:
-    - bbox edges computed via LSE (smooth, gradients flow through all pins)
-    - overlap with grid cells uses relu(min - max), continuous and piece-wise linear
-    - top-k via torch.topk (differentiable w.r.t. cell values)
+    Kept here for reference / comparison. Use lroute_congestion_loss() instead.
+    """
+    rows = b.grid_rows
+    cols = b.grid_cols
+    cw = b.canvas_width / cols
+    ch = b.canvas_height / rows
+    num_nets = data["num_nets"]
+    net_idx  = data["pin_net_idx"]
+    net_weights = b.net_weights.to(device)
+
+    x = pin_xy[:, 0]
+    y = pin_xy[:, 1]
+    alpha = 50.0
+
+    net_x_max =  _scatter_lse( x, net_idx, num_nets, alpha)
+    net_x_min = -_scatter_lse(-x, net_idx, num_nets, alpha)
+    net_y_max =  _scatter_lse( y, net_idx, num_nets, alpha)
+    net_y_min = -_scatter_lse(-y, net_idx, num_nets, alpha)
+
+    bbox_w = (net_x_max - net_x_min).clamp(min=cw * 0.5)
+    bbox_h = (net_y_max - net_y_min).clamp(min=ch * 0.5)
+    routing_density = net_weights / (bbox_w * bbox_h)
+
+    col_left  = torch.arange(cols, device=device, dtype=torch.float32).unsqueeze(0) * cw
+    col_right = col_left + cw
+    row_bot   = torch.arange(rows, device=device, dtype=torch.float32).unsqueeze(0) * ch
+    row_top   = row_bot + ch
+
+    xmin = net_x_min.unsqueeze(1); xmax = net_x_max.unsqueeze(1)
+    ymin = net_y_min.unsqueeze(1); ymax = net_y_max.unsqueeze(1)
+
+    overlap_x = F.relu(torch.minimum(xmax, col_right) - torch.maximum(xmin, col_left))
+    overlap_y = F.relu(torch.minimum(ymax, row_top)   - torch.maximum(ymin, row_bot))
+
+    scaled_x = routing_density.unsqueeze(1) * overlap_x
+    demand   = overlap_y.t() @ scaled_x
+
+    h_supply = float(b.hroutes_per_micron) * ch
+    v_supply = float(b.vroutes_per_micron) * cw
+    avg_supply = (h_supply + v_supply) / 2.0
+
+    demand_flat = demand.flatten() / avg_supply
+    G = rows * cols
+    k = max(1, int(0.05 * G))
+    return torch.topk(demand_flat, k).values.mean()
+
+
+# ---------------------------------------------------------------------------
+# L-route differentiable congestion surrogate (matches plc_client_os.py semantics)
+# ---------------------------------------------------------------------------
+
+def lroute_congestion_loss(
+    pin_xy: torch.Tensor,    # [total_pins, 2] — differentiable pin world coords
+    data: dict,              # from _preprocess(), includes edge_src/snk/weights
+    b: Benchmark,
+    device: torch.device,
+    smooth_range: int = 2,   # IBM benchmarks use smooth_range=2
+) -> torch.Tensor:
+    """
+    Differentiable L-route congestion surrogate matching plc_client_os.py semantics.
+
+    For each 2-pin connection (source → sink) from star decomposition:
+      H segment: horizontal wire at row ≈ source.y, from source.x to sink.x
+        → H_demand[r_src, c] += weight × col_overlap(c, x_min, x_max) / cw
+      V segment: vertical wire at col ≈ sink.x, from source.y to sink.y
+        → V_demand[r, c_snk] += weight × row_overlap(r, y_min, y_max) / ch
+
+    Differentiable via bilinear soft row/col assignment:
+      row bilinear: weight to row floor(y/ch) and floor(y/ch)+1, proportional to fraction
+      col bilinear: weight to col floor(x/cw) and floor(x/cw)+1, proportional to fraction
+
+    Gradients flow: macro_pos → pin_xy → bilinear weights → demand → congestion.
+    The gradient correctly signals "move macros closer to reduce wire length and
+    congestion" — opposite of RUDY which pushed macros apart.
+
+    Returns: mean of top-5% routing utilization (H+V concatenated), same as
+    plc_client_os.py get_congestion_cost().
     """
     rows = b.grid_rows
     cols = b.grid_cols
     cw = b.canvas_width / cols    # cell width  (μm)
     ch = b.canvas_height / rows   # cell height (μm)
-    num_nets = data["num_nets"]
-    net_idx  = data["pin_net_idx"]              # [total_pins]
-    net_weights = b.net_weights.to(device)      # [num_nets]
+
+    edge_src = data["edge_src_idx"]   # [E] flat indices into pin_xy
+    edge_snk = data["edge_snk_idx"]   # [E]
+    edge_wt  = data["edge_weights"]   # [E]
+
+    if edge_src.shape[0] == 0:
+        return pin_xy.sum() * 0.0   # differentiable zero
+
+    src_xy = pin_xy[edge_src]  # [E, 2]
+    snk_xy = pin_xy[edge_snk]  # [E, 2]
+
+    src_x = src_xy[:, 0]   # [E]
+    src_y = src_xy[:, 1]   # [E]
+    snk_x = snk_xy[:, 0]   # [E]
+    snk_y = snk_xy[:, 1]   # [E]
+
+    # Bounding box for each edge (x_min/x_max for H, y_min/y_max for V)
+    x_min = torch.minimum(src_x, snk_x)   # [E]
+    x_max = torch.maximum(src_x, snk_x)
+    y_min = torch.minimum(src_y, snk_y)
+    y_max = torch.maximum(src_y, snk_y)
 
     # ------------------------------------------------------------------
-    # Step 1: Differentiable per-net bounding boxes via LSE
+    # H DEMAND: horizontal wire at row≈src_y, spanning [x_min, x_max]
     #
-    # _scatter_lse gives log-sum-exp approximation of max/min per net.
-    # With alpha=50: within 0.02μm of true max for typical pin spreads.
-    # Critical: unlike scatter_reduce(amax), LSE distributes gradient to
-    # ALL pins near the boundary (exponential weighting), not just the winner.
-    # This means moving any pin slightly toward a crowded region creates a
-    # gradient, not just the outermost pin.
+    # Row bilinear: src_y determines which two rows receive H demand.
+    #   row_float = src_y / ch
+    #   row_lo = floor(row_float) → gets weight w_lo = 1 - frac
+    #   row_hi = row_lo + 1       → gets weight w_hi = frac
+    # Gradient dw_hi/dsrc_y = 1/ch flows through scatter → H_demand.
+    #
+    # Column overlap: fraction of column c covered by the horizontal wire.
+    #   H_col_overlap[e, c] = relu(min(x_max, col_right_c) - max(x_min, col_left_c)) / cw
+    #   Interior columns: = 1.0 (fully covered) → matches competition's +weight
+    #   Edge columns: < 1.0 (partial) → smooth interpolation
     # ------------------------------------------------------------------
-    x = pin_xy[:, 0]
-    y = pin_xy[:, 1]
-    alpha = 50.0  # high alpha → close to true HPWL but still smooth
+    row_float = (src_y / ch).clamp(0.0, float(rows))
+    row_lo = row_float.detach().long().clamp(0, rows - 1)   # [E] integer, no grad
+    row_hi = (row_lo + 1).clamp(0, rows - 1)               # [E]
+    row_w_hi = (row_float - row_lo.float()).clamp(0.0, 1.0) # [E] diff w.r.t. src_y
+    row_w_lo = 1.0 - row_w_hi                              # [E]
 
-    net_x_max =  _scatter_lse( x, net_idx, num_nets, alpha)   # [num_nets]
-    net_x_min = -_scatter_lse(-x, net_idx, num_nets, alpha)
-    net_y_max =  _scatter_lse( y, net_idx, num_nets, alpha)
-    net_y_min = -_scatter_lse(-y, net_idx, num_nets, alpha)
-
-    # ------------------------------------------------------------------
-    # Step 2: Per-net routing density = net_weight / bbox_area
-    #
-    # Clamp bbox to at least half a grid cell in each dimension.
-    # Why? A net with all pins at the same location has bbox_area = 0.
-    # Dividing by 0 → infinite density → NaN gradients.
-    # Physically: a point net concentrates routing demand in one cell;
-    # clamping at 0.5*cell gives a finite, interpretable density.
-    # The clamp creates zero gradient in this degenerate zone, which is
-    # correct: moving a single-pin net doesn't change its congestion.
-    # ------------------------------------------------------------------
-    bbox_w = (net_x_max - net_x_min).clamp(min=cw * 0.5)    # [num_nets]
-    bbox_h = (net_y_max - net_y_min).clamp(min=ch * 0.5)    # [num_nets]
-    routing_density = net_weights / (bbox_w * bbox_h)         # [num_nets], weight/μm²
-
-    # ------------------------------------------------------------------
-    # Step 3: Bilinear overlap scatter via factored matrix multiply
-    #
-    # overlap_x[n, c] = horizontal overlap (μm) between net n's bbox
-    #                   and grid column c.
-    # overlap_y[n, r] = vertical overlap (μm) between net n's bbox
-    #                   and grid row r.
-    #
-    # Why relu(min-max) is bilinear interpolation:
-    #   If bbox left edge x_min sits between column c and c+1, then:
-    #     overlap_x[n, c] = cell_right(c) - x_min   (decreases as x_min increases)
-    #     overlap_x[n, c+1] = x_min - cell_left(c+1) (increases as x_min increases)
-    #   These weights change linearly with x_min → continuous gradient.
-    #   No floor(), no integer casting, no step functions.
-    #
-    # Factored matmul:
-    #   demand[r, c] = Σ_n d[n] * Ox[n,c] * Oy[n,r]
-    #                = overlap_y.T @ (d[:,None] * overlap_x)
-    #   Shape: [rows, N] @ [N, cols] = [rows, cols]
-    #   One GEMM call instead of a O(N*G) Python loop.
-    #   Memory: overlap_x [N, cols] + overlap_y [N, rows] (both tiny)
-    # ------------------------------------------------------------------
-
-    # Column left/right edges: [1, cols]
-    col_left  = torch.arange(cols, device=device, dtype=torch.float32).unsqueeze(0) * cw
+    # Column edges: [1, C]
+    col_left  = (torch.arange(cols, device=device, dtype=torch.float32) * cw).unsqueeze(0)
     col_right = col_left + cw
 
-    # Row bottom/top edges: [1, rows]
-    row_bot = torch.arange(rows, device=device, dtype=torch.float32).unsqueeze(0) * ch
+    # H column overlap: [E, C] — fraction of column covered by horizontal wire
+    H_col_ov = F.relu(
+        torch.minimum(x_max.unsqueeze(1), col_right) -
+        torch.maximum(x_min.unsqueeze(1), col_left)
+    ) / cw  # [E, C] in [0, 1]
+
+    # Weighted contributions: [E, C]
+    H_lo = edge_wt.unsqueeze(1) * row_w_lo.unsqueeze(1) * H_col_ov
+    H_hi = edge_wt.unsqueeze(1) * row_w_hi.unsqueeze(1) * H_col_ov
+
+    # Scatter into H_demand [R, C]: for each edge e, add H_lo[e,:] to row row_lo[e]
+    idx_lo = row_lo.unsqueeze(1).expand(-1, cols)  # [E, C]
+    idx_hi = row_hi.unsqueeze(1).expand(-1, cols)  # [E, C]
+    H_demand = torch.zeros(rows, cols, device=device, dtype=pin_xy.dtype)
+    H_demand = H_demand.scatter_add(0, idx_lo, H_lo)
+    H_demand = H_demand.scatter_add(0, idx_hi, H_hi)
+
+    # ------------------------------------------------------------------
+    # V DEMAND: vertical wire at col≈snk_x, spanning [y_min, y_max]
+    #
+    # Column bilinear: snk_x determines which two columns receive V demand.
+    #   col_float = snk_x / cw
+    #   col_lo = floor(col_float) → weight w_lo = 1 - frac
+    #   col_hi = col_lo + 1       → weight w_hi = frac
+    #
+    # Row overlap: fraction of row r covered by the vertical wire.
+    #   V_row_ov[e, r] = relu(min(y_max, row_top_r) - max(y_min, row_bot_r)) / ch
+    # ------------------------------------------------------------------
+    col_float = (snk_x / cw).clamp(0.0, float(cols))
+    col_lo = col_float.detach().long().clamp(0, cols - 1)   # [E]
+    col_hi = (col_lo + 1).clamp(0, cols - 1)               # [E]
+    col_w_hi = (col_float - col_lo.float()).clamp(0.0, 1.0) # [E]
+    col_w_lo = 1.0 - col_w_hi
+
+    # Row edges: [1, R]
+    row_bot = (torch.arange(rows, device=device, dtype=torch.float32) * ch).unsqueeze(0)
     row_top = row_bot + ch
 
-    # Net bbox edges: [num_nets, 1] for broadcasting with [1, cols/rows]
-    xmin = net_x_min.unsqueeze(1)
-    xmax = net_x_max.unsqueeze(1)
-    ymin = net_y_min.unsqueeze(1)
-    ymax = net_y_max.unsqueeze(1)
+    # V row overlap: [E, R]
+    V_row_ov = F.relu(
+        torch.minimum(y_max.unsqueeze(1), row_top) -
+        torch.maximum(y_min.unsqueeze(1), row_bot)
+    ) / ch  # [E, R] in [0, 1]
 
-    # Horizontal overlap per (net, column): [num_nets, cols]
-    overlap_x = F.relu(torch.minimum(xmax, col_right) - torch.maximum(xmin, col_left))
-    # Vertical overlap per (net, row): [num_nets, rows]
-    overlap_y = F.relu(torch.minimum(ymax, row_top)   - torch.maximum(ymin, row_bot))
+    # Contributions [E, R]:
+    V_lo = edge_wt.unsqueeze(1) * col_w_lo.unsqueeze(1) * V_row_ov
+    V_hi = edge_wt.unsqueeze(1) * col_w_hi.unsqueeze(1) * V_row_ov
 
-    # Scatter: demand[r, c] = overlap_y.T @ (routing_density[:,None] * overlap_x)
-    scaled_x = routing_density.unsqueeze(1) * overlap_x   # [num_nets, cols]
-    demand   = overlap_y.t() @ scaled_x                   # [rows, cols]
+    # Scatter into V_demand [R, C] along column dimension:
+    # V_demand[r, col_lo[e]] += V_lo[e, r]  →  after transpose: [R, E] into [R, C]
+    V_lo_t = V_lo.t()   # [R, E]
+    V_hi_t = V_hi.t()   # [R, E]
+    c_lo_exp = col_lo.unsqueeze(0).expand(rows, -1)   # [R, E]
+    c_hi_exp = col_hi.unsqueeze(0).expand(rows, -1)   # [R, E]
+    V_demand = torch.zeros(rows, cols, device=device, dtype=pin_xy.dtype)
+    V_demand = V_demand.scatter_add(1, c_lo_exp, V_lo_t)
+    V_demand = V_demand.scatter_add(1, c_hi_exp, V_hi_t)
 
     # ------------------------------------------------------------------
-    # Step 4: Normalize by routing supply, compute top-5% mean (ABU 5%)
+    # Normalize by routing supply
     #
-    # Supply per cell (matching competition's get_routing() formula):
-    #   horizontal supply = cell_height × hroutes_per_micron
-    #   vertical   supply = cell_width  × vroutes_per_micron
-    # We average H+V supply to get a single scalar normalizer.
+    # H_supply = cell_height × hroutes_per_micron  (horizontal tracks per cell)
+    # V_supply = cell_width  × vroutes_per_micron  (vertical tracks per cell)
     #
-    # Why top-5% instead of mean or max?
-    # - mean: dilutes hotspots; 95% of fine cells mask the broken 5%
-    # - max:  single cell dominates; noisy, unstable gradients
-    # - top-5%: captures routing bottlenecks while averaging over enough
-    #   cells for stable gradient signal. Matches competition's ABU formula.
+    # H_cong[r,c] = H_demand[r,c] / H_supply
+    # V_cong[r,c] = V_demand[r,c] / V_supply
+    #
+    # For ibm01: H_supply ≈ 37.0 tracks/cell, V_supply ≈ 54.4 tracks/cell
     # ------------------------------------------------------------------
-    h_supply = float(b.hroutes_per_micron) * ch   # horizontal tracks per cell
-    v_supply = float(b.vroutes_per_micron) * cw   # vertical tracks per cell
-    avg_supply = (h_supply + v_supply) / 2.0
+    h_supply = float(b.hroutes_per_micron) * ch
+    v_supply = float(b.vroutes_per_micron) * cw
+    H_cong = H_demand / h_supply   # [R, C]
+    V_cong = V_demand / v_supply   # [R, C]
 
-    demand_flat = demand.flatten() / avg_supply   # [G] utilization estimate
+    # ------------------------------------------------------------------
+    # Smooth: box filter (matches competition's __smooth_routing_cong)
+    #
+    # V_cong: smooth horizontally (along column dim) — same row, ±smooth_range cols
+    # H_cong: smooth vertically  (along row dim)    — same col, ±smooth_range rows
+    #
+    # We use F.conv2d with replicate padding. The competition uses a distribution
+    # filter (source value / window_size → spreads to neighbors). Both are
+    # equivalent to a box-filter average for interior cells; boundary handling
+    # differs slightly — acceptable for a surrogate.
+    # ------------------------------------------------------------------
+    if smooth_range > 0:
+        k = 2 * smooth_range + 1
+        # V_cong horizontal smoothing: kernel along dim 3 (cols)
+        kh = torch.ones(1, 1, 1, k, device=device, dtype=V_cong.dtype) / k
+        vc4d = F.pad(V_cong[None, None], (smooth_range, smooth_range, 0, 0), mode='replicate')
+        V_cong = F.conv2d(vc4d, kh).squeeze(0).squeeze(0)   # [R, C]
 
-    G = rows * cols
-    k = max(1, int(0.05 * G))
-    top_k = torch.topk(demand_flat, k).values     # [k] busiest cells
-    return top_k.mean()
+        # H_cong vertical smoothing: kernel along dim 2 (rows)
+        kv = torch.ones(1, 1, k, 1, device=device, dtype=H_cong.dtype) / k
+        hc4d = F.pad(H_cong[None, None], (0, 0, smooth_range, smooth_range), mode='replicate')
+        H_cong = F.conv2d(hc4d, kv).squeeze(0).squeeze(0)   # [R, C]
+
+    # ------------------------------------------------------------------
+    # Top-5% mean of concatenated H+V grids (matches abu(H+V, 0.05))
+    #
+    # Competition: abu(V_routing_cong + H_routing_cong, 0.05)
+    # '+' = Python list concatenation → 2×R×C values total
+    # We take top-5% of the combined tensor.
+    # torch.topk is differentiable w.r.t. values (not indices).
+    # ------------------------------------------------------------------
+    combined = torch.cat([H_cong.flatten(), V_cong.flatten()])   # [2*R*C]
+    k_top = max(1, int(0.05 * combined.shape[0]))
+    return torch.topk(combined, k_top).values.mean()
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +573,7 @@ def _legalize(pos: torch.Tensor, b: Benchmark) -> torch.Tensor:
         pos[i, 0] = max(hw, min(pos[i, 0].item(), cw - hw))
         pos[i, 1] = max(hh, min(pos[i, 1].item(), ch - hh))
 
-    # ---------- Phase 1: pairwise separation (100 passes) ----------
+    # Phase 1: pairwise separation
     for _ in range(100):
         any_overlap = False
         for a in range(len(movable)):
@@ -463,7 +602,7 @@ def _legalize(pos: torch.Tensor, b: Benchmark) -> torch.Tensor:
         if not any_overlap:
             return pos
 
-    # ---------- Phase 2: spiral fallback for remaining violators ----------
+    # Phase 2: spiral fallback for remaining violators
     def _overlaps(i: int, others: list) -> bool:
         xi, yi = pos[i, 0].item(), pos[i, 1].item()
         wi, hi = sizes[i, 0].item(), sizes[i, 1].item()
@@ -511,14 +650,201 @@ def _legalize(pos: torch.Tensor, b: Benchmark) -> torch.Tensor:
 
 
 # ---------------------------------------------------------------------------
-# Soft macro force-directed refinement
+# SA refinement helpers
+# ---------------------------------------------------------------------------
+
+def _has_hard_overlap(i: int, pos: torch.Tensor, sizes: torch.Tensor,
+                       num_hard: int, gap: float = 0.02) -> bool:
+    """Check if macro i overlaps any other hard macro. O(N)."""
+    xi, yi = pos[i, 0].item(), pos[i, 1].item()
+    wi, hi = sizes[i, 0].item(), sizes[i, 1].item()
+    for j in range(num_hard):
+        if j == i:
+            continue
+        xj, yj = pos[j, 0].item(), pos[j, 1].item()
+        wj, hj = sizes[j, 0].item(), sizes[j, 1].item()
+        if abs(xi - xj) < (wi + wj) / 2 + gap and abs(yi - yj) < (hi + hj) / 2 + gap:
+            return True
+    return False
+
+
+def _nearest_movable(i: int, movable: list, pos: torch.Tensor) -> int:
+    """Return index of the nearest movable macro to macro i. O(N)."""
+    xi, yi = pos[i, 0].item(), pos[i, 1].item()
+    best_j, best_d2 = -1, float("inf")
+    for j in movable:
+        if j == i:
+            continue
+        d2 = (pos[j, 0].item() - xi) ** 2 + (pos[j, 1].item() - yi) ** 2
+        if d2 < best_d2:
+            best_d2 = d2
+            best_j = j
+    return best_j
+
+
+# ---------------------------------------------------------------------------
+# SA refinement (post-legalization)
+# ---------------------------------------------------------------------------
+
+def _sa_refinement(
+    pos_cpu: torch.Tensor,    # [num_macros, 2] — after legalization, on CPU
+    b: Benchmark,
+    data: dict,               # from _preprocess(), on device
+    device: torch.device,
+    max_iters: int = 3000,
+    time_budget_s: float = 30.0,
+) -> torch.Tensor:
+    """
+    SA refinement using WL + density surrogate objective.
+
+    Why SA after gradient descent?
+    - Gradient descent finds a good basin in a continuous landscape but gets
+      stuck in local minima because Adam is a first-order method.
+    - SA accepts bad moves with probability exp(-ΔCost/T), allowing escape
+      from local minima. At low T (cold start), it mostly accepts improvements.
+    - Starting cold (T = 0.01 × canvas_max) preserves the gradient solution's
+      quality while allowing micro-corrections.
+
+    Why use WL+density surrogate instead of full plc proxy?
+    - plc.get_congestion_cost() is O(nets × grid) in pure Python: ~0.5-2s/call.
+      With 30s budget, this gives only ~15-60 SA iterations — nearly nothing.
+    - Our torch surrogate evaluates in ~5ms: gives 3000-6000 iterations in 30s.
+    - WL+density covers 67% of the proxy cost (0.5×density is the biggest term
+      in high-utilization benchmarks). SA on 67% of objective >> SA on 100% with
+      15 iterations.
+
+    Why neighbor-biased swaps?
+    - Random swaps often propose moves that are far from the current basin
+      and get rejected. Neighbor-biased swaps try nearby macros first,
+      which have higher acceptance rates and produce more meaningful moves.
+      At high T: random swaps dominate (exploration). At low T: neighbor
+      swaps dominate (local refinement). We use 70/30 split.
+
+    Temperature schedule:
+    - T_start = 0.01 × max(cw, ch): much lower than will_seed's 0.15.
+      We start from a good gradient-descent solution, not random.
+      High T_start would destroy the gradient's work by accepting random moves.
+    - T_end = 0.0001 × max(cw, ch): small perturbations at end.
+    - Geometric cooling: T *= (T_end/T_start)^(1/max_iters) each iteration.
+    """
+    pos = pos_cpu.clone().to(device)
+    sizes    = b.macro_sizes.to(device)
+    port_pos = b.port_positions.to(device)
+    num_hard = b.num_hard_macros
+    cw, ch   = b.canvas_width, b.canvas_height
+
+    movable = [i for i in range(num_hard) if not b.macro_fixed[i].item()]
+    if len(movable) < 2:
+        return pos_cpu
+
+    cell_centers, cell_size = _make_cell_centers(b, device)
+    half_w = sizes[:, 0] / 2   # [N]
+    half_h = sizes[:, 1] / 2   # [N]
+
+    @torch.no_grad()
+    def _cost(p: torch.Tensor) -> float:
+        pin_xy = _compute_pin_xy(p, data, b, port_pos)
+        wl  = lse_hpwl_loss(pin_xy, data, b, alpha=50.0)
+        den = density_loss(p, sizes, cell_centers, cell_size, b, target_density=1.0)
+        return (wl + 0.5 * den).item()
+
+    T_canvas = max(cw, ch)
+    T       = T_canvas * 0.01
+    T_end   = T_canvas * 0.0001
+    cooling = (T_end / T) ** (1.0 / max_iters)
+
+    current_cost = _cost(pos)
+    best_cost    = current_cost
+    best_pos     = pos.clone()
+
+    start_t    = time.time()
+    n_accepted = 0
+    n_tried    = 0
+    last_iter  = 0
+
+    for it in range(max_iters):
+        if it % 200 == 0 and time.time() - start_t > time_budget_s:
+            break
+
+        last_iter = it
+        i = movable[random.randrange(len(movable))]
+        old_xi = pos[i, 0].item()
+        old_yi = pos[i, 1].item()
+        j      = -1
+        old_xj = old_yj = 0.0
+
+        if random.random() < 0.6:
+            # SHIFT: Gaussian perturbation; sigma proportional to temperature
+            sigma  = T
+            new_x  = old_xi + random.gauss(0.0, sigma)
+            new_y  = old_yi + random.gauss(0.0, sigma)
+            new_x  = max(half_w[i].item(), min(new_x, cw - half_w[i].item()))
+            new_y  = max(half_h[i].item(), min(new_y, ch - half_h[i].item()))
+            pos[i, 0] = new_x
+            pos[i, 1] = new_y
+
+            if _has_hard_overlap(i, pos, sizes, num_hard):
+                pos[i, 0] = old_xi
+                pos[i, 1] = old_yi
+                T *= cooling
+                continue
+        else:
+            # SWAP: exchange positions of i and j
+            if random.random() < 0.7:
+                j = _nearest_movable(i, movable, pos)  # neighbor-biased
+            else:
+                j = movable[random.randrange(len(movable))]
+
+            if j == i or j < 0:
+                T *= cooling
+                continue
+
+            old_xj = pos[j, 0].item()
+            old_yj = pos[j, 1].item()
+            pos[i, 0] = old_xj; pos[i, 1] = old_yj
+            pos[j, 0] = old_xi; pos[j, 1] = old_yi
+
+            # Canvas bounds check for both macros at swapped positions
+            if (pos[i, 0] < half_w[i] or pos[i, 0] > cw - half_w[i] or
+                    pos[i, 1] < half_h[i] or pos[i, 1] > ch - half_h[i] or
+                    pos[j, 0] < half_w[j] or pos[j, 0] > cw - half_w[j] or
+                    pos[j, 1] < half_h[j] or pos[j, 1] > ch - half_h[j] or
+                    _has_hard_overlap(i, pos, sizes, num_hard) or
+                    _has_hard_overlap(j, pos, sizes, num_hard)):
+                pos[i, 0] = old_xi; pos[i, 1] = old_yi
+                pos[j, 0] = old_xj; pos[j, 1] = old_yj
+                T *= cooling
+                continue
+
+        n_tried += 1
+        new_cost = _cost(pos)
+        delta    = new_cost - current_cost
+
+        if delta < 0 or random.random() < math.exp(-delta / (T + 1e-12)):
+            current_cost = new_cost
+            n_accepted  += 1
+            if new_cost < best_cost:
+                best_cost = new_cost
+                best_pos  = pos.clone()
+        else:
+            pos[i, 0] = old_xi; pos[i, 1] = old_yi
+            if j >= 0:
+                pos[j, 0] = old_xj; pos[j, 1] = old_yj
+
+        T *= cooling
+
+    elapsed = time.time() - start_t
+    print(f"  [SA] {last_iter + 1} iters, {n_tried} evals, {n_accepted} accepted  "
+          f"surrogate: {current_cost:.4f} → {best_cost:.4f}  ({elapsed:.1f}s)")
+    return best_pos.cpu()
+
+
+# ---------------------------------------------------------------------------
+# Soft macro force-directed refinement (unused — kept for future experiments)
 # ---------------------------------------------------------------------------
 
 def _soft_macro_fd(pos: torch.Tensor, b: Benchmark, steps: int = 300) -> torch.Tensor:
-    """
-    Force-directed placement for soft macros, treating hard macros as fixed.
-    Uses net_nodes (not net_pin_nodes) for connectivity since soft macros pin at center.
-    """
+    """Force-directed placement for soft macros. Currently not called."""
     pos = pos.clone()
     num_hard  = b.num_hard_macros
     num_macro = b.num_macros
@@ -528,22 +854,18 @@ def _soft_macro_fd(pos: torch.Tensor, b: Benchmark, steps: int = 300) -> torch.T
     if not soft_idx:
         return pos
 
-    # Build adjacency: soft_macro_idx → list of (other_idx, weight)
     soft_adj: dict[int, list[tuple[int, float]]] = {i: [] for i in soft_idx}
     for net_i, nodes in enumerate(b.net_nodes):
         w = float(b.net_weights[net_i].item())
         node_list = nodes.tolist()
         for ni in node_list:
-            if ni >= num_hard and ni < num_macro:  # soft macro
+            if ni >= num_hard and ni < num_macro:
                 for nj in node_list:
                     if nj != ni:
                         soft_adj[ni].append((nj, w))
 
-    # Precompute hard macro repulsion radii
-    hard_rep = [
-        (b.macro_sizes[j, 0].item() + b.macro_sizes[j, 1].item()) / 2
-        for j in range(num_hard)
-    ]
+    hard_rep = [(b.macro_sizes[j, 0].item() + b.macro_sizes[j, 1].item()) / 2
+                for j in range(num_hard)]
 
     T = max(cw, ch) * 0.01
     cooling = 0.97
@@ -552,8 +874,6 @@ def _soft_macro_fd(pos: torch.Tensor, b: Benchmark, steps: int = 300) -> torch.T
         for i in soft_idx:
             fx, fy = 0.0, 0.0
             xi, yi = pos[i, 0].item(), pos[i, 1].item()
-
-            # Attractive spring to connected nodes
             for j, w in soft_adj[i]:
                 if j < num_macro:
                     xj, yj = pos[j, 0].item(), pos[j, 1].item()
@@ -565,39 +885,27 @@ def _soft_macro_fd(pos: torch.Tensor, b: Benchmark, steps: int = 300) -> torch.T
                         continue
                 dx, dy = xj - xi, yj - yi
                 dist = math.sqrt(dx * dx + dy * dy) + 1e-6
-                fx += w * dx / dist
-                fy += w * dy / dist
-
-            # Repulsive from hard macros
+                fx += w * dx / dist; fy += w * dy / dist
             for j in range(num_hard):
                 xj, yj = pos[j, 0].item(), pos[j, 1].item()
                 dx, dy = xi - xj, yi - yj
                 dist = math.sqrt(dx * dx + dy * dy) + 1e-6
                 rep = hard_rep[j]
                 if dist < rep * 2.5:
-                    strength = rep * rep / (dist * dist + 1e-6)
-                    fx += strength * dx / dist
-                    fy += strength * dy / dist
-
+                    s = rep * rep / (dist * dist + 1e-6)
+                    fx += s * dx / dist; fy += s * dy / dist
             norm = math.sqrt(fx * fx + fy * fy) + 1e-6
             scale = min(T, norm) / norm
-            xi += fx * scale
-            yi += fy * scale
-
-            hw = b.macro_sizes[i, 0].item() / 2
-            hh = b.macro_sizes[i, 1].item() / 2
-            xi = max(hw, min(xi, cw - hw))
-            yi = max(hh, min(yi, ch - hh))
-            pos[i, 0] = xi
-            pos[i, 1] = yi
-
+            xi = max(b.macro_sizes[i, 0].item() / 2, min(xi + fx * scale, cw - b.macro_sizes[i, 0].item() / 2))
+            yi = max(b.macro_sizes[i, 1].item() / 2, min(yi + fy * scale, ch - b.macro_sizes[i, 1].item() / 2))
+            pos[i, 0] = xi; pos[i, 1] = yi
         T *= cooling
 
     return pos
 
 
 # ---------------------------------------------------------------------------
-# Main placer class (API: place(self, benchmark) -> Tensor)
+# Main placer class
 # ---------------------------------------------------------------------------
 
 class AnalyticalPlacer:
@@ -625,26 +933,34 @@ class AnalyticalPlacer:
         movable_idx = movable.nonzero(as_tuple=True)[0]  # [num_movable]
 
         # Init from current benchmark positions
-        pos_full = b.macro_positions.clone().to(device)
+        pos_full    = b.macro_positions.clone().to(device)
         pos_movable = pos_full[movable_idx].detach().requires_grad_(True)
 
+        # ------------------------------------------------------------------
+        # Hyperparameters
+        #
+        # CONG_W phases:
+        #   Phase 1 (steps 0-99): CONG_W = 0 — let density+overlap resolve first.
+        #     Adding congestion before overlaps are gone causes the L-route gradient
+        #     to fight the overlap penalty → unstable optimization.
+        #   Phase 2 (steps 100-299): CONG_W = 0.3 — L-route gradient pulls macros
+        #     into low-congestion configurations. Start AFTER overlaps ≈ 0.
+        #
+        # OVL_W = 20 throughout: RUDY's regression (Session 2) showed that
+        #   reducing OVL_W to 5 in phase 2 allowed congestion gradient to recreate
+        #   small overlaps → 20-51x slower legalization. Keep OVL_W = 20 always.
+        # ------------------------------------------------------------------
         TOTAL_STEPS    = 300
         ALPHA_START    = 10.0
         ALPHA_END      = 30.0
-        DEN_W_PHASE1   = 2.0    # strong cell+macro overlap penalty
-        DEN_W_PHASE2   = 0.4    # gentle spreading in phase 2
+        DEN_W_PHASE1   = 2.0    # strong cell density penalty
+        DEN_W_PHASE2   = 0.4    # gentle spreading
         OVL_W_PHASE1   = 20.0   # direct macro-pair overlap penalty
-        OVL_W_PHASE2   = 20.0   # keep SAME — RUDY can re-create hard macro overlaps
-                                 # when OVL drops; high OVL prevents 30-50x slow legalization
-        # RUDY congestion weight.
-        # RUDY (bbox-uniform model) and competition (L-route model) give
-        # opposing gradients on already-spread placements: RUDY rewards
-        # larger bboxes (lower per-cell density) but L-routes get longer.
-        # Use a small weight so RUDY is a light regularizer, not dominant.
-        CONG_W_PHASE1  = 0.0    # no congestion signal until overlaps are resolved
-        CONG_W_PHASE2  = 0.1    # gentle spreading pressure, not dominant
-        PHASE2_START   = 100    # switch after overlaps resolved
-        TARGET_DEN     = 1.0    # penalize cell overflow
+        OVL_W_PHASE2   = 20.0   # NEVER reduce — prevents legalization regression
+        CONG_W_PHASE1  = 0.0    # no congestion until overlaps resolve
+        CONG_W_PHASE2  = 0.3    # L-route surrogate (tune if ibm01 regresses)
+        PHASE2_START   = 100
+        TARGET_DEN     = 1.0
         LR             = 0.05
         GRAD_CLIP      = 5.0
 
@@ -657,36 +973,37 @@ class AnalyticalPlacer:
         best_movable = pos_movable.detach().clone()
 
         cw, ch = b.canvas_width, b.canvas_height
-        half_w = sizes[:, 0] / 2   # [N]
-        half_h = sizes[:, 1] / 2   # [N]
+        half_w = sizes[:, 0] / 2
+        half_h = sizes[:, 1] / 2
 
         print(f"[analytical_placer] Gradient descent ({TOTAL_STEPS} steps)...")
         for step in range(TOTAL_STEPS):
             optimizer.zero_grad()
 
-            # Reconstruct full pos tensor; only movable portion is differentiable
             pos = pos_full.clone()
             pos[movable_idx] = pos_movable
 
-            # Clamp to canvas (differentiable, passes grad through)
             pos_x = pos[:, 0].clamp(half_w, cw - half_w)
             pos_y = pos[:, 1].clamp(half_h, ch - half_h)
-            pos = torch.stack([pos_x, pos_y], dim=1)
+            pos   = torch.stack([pos_x, pos_y], dim=1)
 
             frac  = step / TOTAL_STEPS
             alpha = ALPHA_START + (ALPHA_END - ALPHA_START) * frac
-
-            pin_xy = _compute_pin_xy(pos, data, b, port_pos)
-            wl  = lse_hpwl_loss(pin_xy, data, b, alpha)
-            den = density_loss(pos, sizes, cell_centers, cell_size, b,
-                               target_density=TARGET_DEN)
-            ovl = macro_overlap_loss(pos, sizes, b.num_hard_macros)
 
             den_w  = DEN_W_PHASE1  if step < PHASE2_START else DEN_W_PHASE2
             ovl_w  = OVL_W_PHASE1  if step < PHASE2_START else OVL_W_PHASE2
             cong_w = CONG_W_PHASE1 if step < PHASE2_START else CONG_W_PHASE2
 
-            cong = rudy_congestion_loss(pin_xy, data, b, device)
+            pin_xy = _compute_pin_xy(pos, data, b, port_pos)
+            wl  = lse_hpwl_loss(pin_xy, data, b, alpha)
+            den = density_loss(pos, sizes, cell_centers, cell_size, b, target_density=TARGET_DEN)
+            ovl = macro_overlap_loss(pos, sizes, b.num_hard_macros)
+
+            if cong_w > 0:
+                cong = lroute_congestion_loss(pin_xy, data, b, device)
+            else:
+                cong = torch.zeros(1, device=device).squeeze()
+
             loss = wl + den_w * den + ovl_w * ovl + cong_w * cong
             loss.backward()
 
@@ -694,7 +1011,6 @@ class AnalyticalPlacer:
             optimizer.step()
             scheduler.step()
 
-            # Hard-project back to canvas after optimizer step
             with torch.no_grad():
                 pos_movable[:, 0].clamp_(half_w[movable_idx], cw - half_w[movable_idx])
                 pos_movable[:, 1].clamp_(half_h[movable_idx], ch - half_h[movable_idx])
@@ -714,9 +1030,15 @@ class AnalyticalPlacer:
         final_gpu[movable_idx] = best_movable
         analytical_pos = final_gpu.cpu()
 
-        # Phase 3: legalize hard macros (soft macros kept at initial positions
-        # from the .plc file, which are already placement-tool optimized)
+        # Phase 3: legalize hard macros
         print("[analytical_placer] Legalizing hard macros...")
         final_pos = _legalize(analytical_pos, b)
+
+        # Phase 4: SA refinement using WL + density surrogate
+        print("[analytical_placer] SA refinement (WL+density surrogate, 30s budget)...")
+        final_pos = _sa_refinement(
+            final_pos, b, data, device,
+            max_iters=3000, time_budget_s=30.0
+        )
 
         return final_pos
