@@ -1,6 +1,6 @@
 """
-Analytical global placer: LSE-HPWL + bell-kernel density surrogate
-Optimization: Adam gradient descent → greedy spiral legalization → soft-macro FD
+Analytical global placer: LSE-HPWL + density + RUDY congestion surrogate
+Optimization: Adam gradient descent → greedy spiral legalization
 
 Pin resolution (from net_pin_nodes col0 = owner index):
   [0, num_hard)           hard macro → placement[owner] + macro_pin_offsets[owner][slot]
@@ -274,6 +274,143 @@ def macro_overlap_loss(
 
 
 # ---------------------------------------------------------------------------
+# RUDY congestion surrogate (Rectangular Uniform wire DensitY)
+# ---------------------------------------------------------------------------
+
+def rudy_congestion_loss(
+    pin_xy: torch.Tensor,   # [total_pins, 2] — differentiable pin world coords
+    data: dict,             # from _preprocess()
+    b: Benchmark,
+    device: torch.device,
+) -> torch.Tensor:
+    """
+    RUDY differentiable congestion surrogate. Returns scalar ≈ competition
+    congestion_cost (top-5% mean routing utilization).
+
+    Core idea: for each net, distribute net_weight / bbox_area uniformly over
+    all grid cells overlapping its bounding box. Cells that many nets route
+    through accumulate high demand → congestion hotspot.
+
+    Differentiable because:
+    - bbox edges computed via LSE (smooth, gradients flow through all pins)
+    - overlap with grid cells uses relu(min - max), continuous and piece-wise linear
+    - top-k via torch.topk (differentiable w.r.t. cell values)
+    """
+    rows = b.grid_rows
+    cols = b.grid_cols
+    cw = b.canvas_width / cols    # cell width  (μm)
+    ch = b.canvas_height / rows   # cell height (μm)
+    num_nets = data["num_nets"]
+    net_idx  = data["pin_net_idx"]              # [total_pins]
+    net_weights = b.net_weights.to(device)      # [num_nets]
+
+    # ------------------------------------------------------------------
+    # Step 1: Differentiable per-net bounding boxes via LSE
+    #
+    # _scatter_lse gives log-sum-exp approximation of max/min per net.
+    # With alpha=50: within 0.02μm of true max for typical pin spreads.
+    # Critical: unlike scatter_reduce(amax), LSE distributes gradient to
+    # ALL pins near the boundary (exponential weighting), not just the winner.
+    # This means moving any pin slightly toward a crowded region creates a
+    # gradient, not just the outermost pin.
+    # ------------------------------------------------------------------
+    x = pin_xy[:, 0]
+    y = pin_xy[:, 1]
+    alpha = 50.0  # high alpha → close to true HPWL but still smooth
+
+    net_x_max =  _scatter_lse( x, net_idx, num_nets, alpha)   # [num_nets]
+    net_x_min = -_scatter_lse(-x, net_idx, num_nets, alpha)
+    net_y_max =  _scatter_lse( y, net_idx, num_nets, alpha)
+    net_y_min = -_scatter_lse(-y, net_idx, num_nets, alpha)
+
+    # ------------------------------------------------------------------
+    # Step 2: Per-net routing density = net_weight / bbox_area
+    #
+    # Clamp bbox to at least half a grid cell in each dimension.
+    # Why? A net with all pins at the same location has bbox_area = 0.
+    # Dividing by 0 → infinite density → NaN gradients.
+    # Physically: a point net concentrates routing demand in one cell;
+    # clamping at 0.5*cell gives a finite, interpretable density.
+    # The clamp creates zero gradient in this degenerate zone, which is
+    # correct: moving a single-pin net doesn't change its congestion.
+    # ------------------------------------------------------------------
+    bbox_w = (net_x_max - net_x_min).clamp(min=cw * 0.5)    # [num_nets]
+    bbox_h = (net_y_max - net_y_min).clamp(min=ch * 0.5)    # [num_nets]
+    routing_density = net_weights / (bbox_w * bbox_h)         # [num_nets], weight/μm²
+
+    # ------------------------------------------------------------------
+    # Step 3: Bilinear overlap scatter via factored matrix multiply
+    #
+    # overlap_x[n, c] = horizontal overlap (μm) between net n's bbox
+    #                   and grid column c.
+    # overlap_y[n, r] = vertical overlap (μm) between net n's bbox
+    #                   and grid row r.
+    #
+    # Why relu(min-max) is bilinear interpolation:
+    #   If bbox left edge x_min sits between column c and c+1, then:
+    #     overlap_x[n, c] = cell_right(c) - x_min   (decreases as x_min increases)
+    #     overlap_x[n, c+1] = x_min - cell_left(c+1) (increases as x_min increases)
+    #   These weights change linearly with x_min → continuous gradient.
+    #   No floor(), no integer casting, no step functions.
+    #
+    # Factored matmul:
+    #   demand[r, c] = Σ_n d[n] * Ox[n,c] * Oy[n,r]
+    #                = overlap_y.T @ (d[:,None] * overlap_x)
+    #   Shape: [rows, N] @ [N, cols] = [rows, cols]
+    #   One GEMM call instead of a O(N*G) Python loop.
+    #   Memory: overlap_x [N, cols] + overlap_y [N, rows] (both tiny)
+    # ------------------------------------------------------------------
+
+    # Column left/right edges: [1, cols]
+    col_left  = torch.arange(cols, device=device, dtype=torch.float32).unsqueeze(0) * cw
+    col_right = col_left + cw
+
+    # Row bottom/top edges: [1, rows]
+    row_bot = torch.arange(rows, device=device, dtype=torch.float32).unsqueeze(0) * ch
+    row_top = row_bot + ch
+
+    # Net bbox edges: [num_nets, 1] for broadcasting with [1, cols/rows]
+    xmin = net_x_min.unsqueeze(1)
+    xmax = net_x_max.unsqueeze(1)
+    ymin = net_y_min.unsqueeze(1)
+    ymax = net_y_max.unsqueeze(1)
+
+    # Horizontal overlap per (net, column): [num_nets, cols]
+    overlap_x = F.relu(torch.minimum(xmax, col_right) - torch.maximum(xmin, col_left))
+    # Vertical overlap per (net, row): [num_nets, rows]
+    overlap_y = F.relu(torch.minimum(ymax, row_top)   - torch.maximum(ymin, row_bot))
+
+    # Scatter: demand[r, c] = overlap_y.T @ (routing_density[:,None] * overlap_x)
+    scaled_x = routing_density.unsqueeze(1) * overlap_x   # [num_nets, cols]
+    demand   = overlap_y.t() @ scaled_x                   # [rows, cols]
+
+    # ------------------------------------------------------------------
+    # Step 4: Normalize by routing supply, compute top-5% mean (ABU 5%)
+    #
+    # Supply per cell (matching competition's get_routing() formula):
+    #   horizontal supply = cell_height × hroutes_per_micron
+    #   vertical   supply = cell_width  × vroutes_per_micron
+    # We average H+V supply to get a single scalar normalizer.
+    #
+    # Why top-5% instead of mean or max?
+    # - mean: dilutes hotspots; 95% of fine cells mask the broken 5%
+    # - max:  single cell dominates; noisy, unstable gradients
+    # - top-5%: captures routing bottlenecks while averaging over enough
+    #   cells for stable gradient signal. Matches competition's ABU formula.
+    # ------------------------------------------------------------------
+    h_supply = float(b.hroutes_per_micron) * ch   # horizontal tracks per cell
+    v_supply = float(b.vroutes_per_micron) * cw   # vertical tracks per cell
+    avg_supply = (h_supply + v_supply) / 2.0
+
+    demand_flat = demand.flatten() / avg_supply   # [G] utilization estimate
+
+    G = rows * cols
+    k = max(1, int(0.05 * G))
+    top_k = torch.topk(demand_flat, k).values     # [k] busiest cells
+    return top_k.mean()
+
+
+# ---------------------------------------------------------------------------
 # Minimal-perturbation legalization (pairwise separation of hard macros only)
 # ---------------------------------------------------------------------------
 
@@ -498,6 +635,13 @@ class AnalyticalPlacer:
         DEN_W_PHASE2   = 0.4    # gentle spreading in phase 2
         OVL_W_PHASE1   = 20.0   # direct macro-pair overlap penalty (phase 1)
         OVL_W_PHASE2   = 5.0    # keep macro-pair penalty active in phase 2
+        # RUDY congestion weight.
+        # RUDY (bbox-uniform model) and competition (L-route model) give
+        # opposing gradients on already-spread placements: RUDY rewards
+        # larger bboxes (lower per-cell density) but L-routes get longer.
+        # Use a small weight so RUDY is a light regularizer, not dominant.
+        CONG_W_PHASE1  = 0.0    # no congestion signal until overlaps are resolved
+        CONG_W_PHASE2  = 0.1    # gentle spreading pressure, not dominant
         PHASE2_START   = 100    # switch after overlaps resolved
         TARGET_DEN     = 1.0    # penalize cell overflow
         LR             = 0.05
@@ -537,9 +681,12 @@ class AnalyticalPlacer:
                                target_density=TARGET_DEN)
             ovl = macro_overlap_loss(pos, sizes, b.num_hard_macros)
 
-            den_w = DEN_W_PHASE1 if step < PHASE2_START else DEN_W_PHASE2
-            ovl_w = OVL_W_PHASE1 if step < PHASE2_START else OVL_W_PHASE2
-            loss  = wl + den_w * den + ovl_w * ovl
+            den_w  = DEN_W_PHASE1  if step < PHASE2_START else DEN_W_PHASE2
+            ovl_w  = OVL_W_PHASE1  if step < PHASE2_START else OVL_W_PHASE2
+            cong_w = CONG_W_PHASE1 if step < PHASE2_START else CONG_W_PHASE2
+
+            cong = rudy_congestion_loss(pin_xy, data, b, device)
+            loss = wl + den_w * den + ovl_w * ovl + cong_w * cong
             loss.backward()
 
             torch.nn.utils.clip_grad_norm_([pos_movable], GRAD_CLIP)
@@ -558,7 +705,8 @@ class AnalyticalPlacer:
 
             if step % 50 == 0:
                 print(f"  step {step:4d}  loss={l:.4f}  wl={wl.item():.4f}  "
-                      f"den={den.item():.6f}  den_w={den_w:.2f}  alpha={alpha:.1f}")
+                      f"den={den.item():.6f}  cong={cong.item():.4f}  "
+                      f"den_w={den_w:.2f}  cong_w={cong_w:.2f}  alpha={alpha:.1f}")
 
         # Reconstruct and move to CPU
         final_gpu = pos_full.clone()
