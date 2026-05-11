@@ -633,8 +633,9 @@ class AnalyticalPlacer:
         ALPHA_END      = 30.0
         DEN_W_PHASE1   = 2.0    # strong cell+macro overlap penalty
         DEN_W_PHASE2   = 0.4    # gentle spreading in phase 2
-        OVL_W_PHASE1   = 20.0   # direct macro-pair overlap penalty (phase 1)
-        OVL_W_PHASE2   = 5.0    # keep macro-pair penalty active in phase 2
+        OVL_W_PHASE1   = 20.0   # direct macro-pair overlap penalty
+        OVL_W_PHASE2   = 20.0   # keep SAME — RUDY can re-create hard macro overlaps
+                                 # when OVL drops; high OVL prevents 30-50x slow legalization
         # RUDY congestion weight.
         # RUDY (bbox-uniform model) and competition (L-route model) give
         # opposing gradients on already-spread placements: RUDY rewards
