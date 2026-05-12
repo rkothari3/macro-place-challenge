@@ -954,11 +954,11 @@ class AnalyticalPlacer:
         ALPHA_START    = 10.0
         ALPHA_END      = 30.0
         DEN_W_PHASE1   = 2.0    # strong cell density penalty
-        DEN_W_PHASE2   = 0.4    # gentle spreading
+        DEN_W_PHASE2   = 0.5    # gentle spreading (raised from 0.4 to resist L-route compression)
         OVL_W_PHASE1   = 20.0   # direct macro-pair overlap penalty
         OVL_W_PHASE2   = 20.0   # NEVER reduce — prevents legalization regression
         CONG_W_PHASE1  = 0.0    # no congestion until overlaps resolve
-        CONG_W_PHASE2  = 0.3    # L-route surrogate (tune if ibm01 regresses)
+        CONG_W_PHASE2  = 0.3    # L-route surrogate; overridden adaptively at step PHASE2_START-1
         PHASE2_START   = 100
         TARGET_DEN     = 1.0
         LR             = 0.05
@@ -1014,6 +1014,21 @@ class AnalyticalPlacer:
             with torch.no_grad():
                 pos_movable[:, 0].clamp_(half_w[movable_idx], cw - half_w[movable_idx])
                 pos_movable[:, 1].clamp_(half_h[movable_idx], ch - half_h[movable_idx])
+
+            # Adaptive CONG_W: measure L-route surrogate just before phase 2 starts.
+            # Low-congestion benchmarks (ibm09/ibm11) regressed with CONG_W=0.3 because
+            # L-route compressed macros that were already well-spread → density spike.
+            # Formula: scale from 0.10 (cong_100≤1.2) to 0.30 (cong_100≥1.8).
+            if step == PHASE2_START - 1:
+                with torch.no_grad():
+                    p_meas = pos_full.clone()
+                    p_meas[movable_idx] = pos_movable
+                    p_meas[:, 0] = p_meas[:, 0].clamp(half_w, cw - half_w)
+                    p_meas[:, 1] = p_meas[:, 1].clamp(half_h, ch - half_h)
+                    pxy_meas = _compute_pin_xy(p_meas, data, b, port_pos)
+                    cong_100 = lroute_congestion_loss(pxy_meas, data, b, device).item()
+                CONG_W_PHASE2 = min(0.30, max(0.10, 0.10 + 0.20 * (cong_100 - 1.2) / 0.6))
+                print(f"  [adaptive] cong_100={cong_100:.4f} → CONG_W_PHASE2={CONG_W_PHASE2:.3f}")
 
             l = loss.item()
             if l < best_loss:
