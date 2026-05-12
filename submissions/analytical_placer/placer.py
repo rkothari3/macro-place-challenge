@@ -695,7 +695,9 @@ def _post_legalize_refine(
     without overriding the WL+cong gradient signal.
 
     Key differences from main gradient:
-      DEN_W = 0   — macros are already spread, no need for density pressure
+      DEN_W = 0.3 — light density guard: macros are legal but cong gradient
+                    without density pulls them together → density spikes.
+                    Observed in results_3: ibm02 +0.18 density from refine alone.
       OVL_W = 5   — light touch; macros start legal so ovl starts at 0
       LR = 0.01   — fine-tuning; smaller than main gradient's 0.05
       alpha = 50  — sharper HPWL for fine-tuning regime
@@ -714,13 +716,15 @@ def _post_legalize_refine(
     half_w = sizes[:, 0] / 2
     half_h = sizes[:, 1] / 2
 
+    cell_centers, cell_size = _make_cell_centers(b, device)
+
     pos_movable = pos[movable_idx].detach().requires_grad_(True)
     optimizer   = torch.optim.Adam([pos_movable], lr=0.01)
 
     best_loss    = float("inf")
     best_movable = pos_movable.detach().clone()
 
-    for _ in range(steps):
+    for step in range(steps):
         optimizer.zero_grad()
 
         p = pos.clone()
@@ -732,8 +736,9 @@ def _post_legalize_refine(
         pin_xy = _compute_pin_xy(p, data, b, port_pos)
         wl   = lse_hpwl_loss(pin_xy, data, b, alpha=50.0)
         cong = lroute_congestion_loss(pin_xy, data, b, device)
+        den  = density_loss(p, sizes, cell_centers, cell_size, b, target_density=1.0)
         ovl  = macro_overlap_loss(p, sizes, num_hard)
-        loss = wl + cong_w * cong + 5.0 * ovl
+        loss = wl + cong_w * cong + 0.3 * den + 5.0 * ovl
         loss.backward()
 
         optimizer.step()
@@ -1187,9 +1192,10 @@ class AnalyticalPlacer:
         final_gpu[movable_idx] = best_movable
         analytical_pos = final_gpu.cpu()
 
-        # Phase 3: legalize hard macros (time-capped at 20s for large benchmarks)
+        # Phase 3: legalize hard macros (120s cap — most benchmarks converge well
+        # within this; only ibm10's ~1100s extreme case gets truncated)
         print("[analytical_placer] Legalizing hard macros...")
-        final_pos = _legalize(analytical_pos, b, time_budget_s=20.0)
+        final_pos = _legalize(analytical_pos, b, time_budget_s=120.0)
 
         # Phase 4: post-legalization gradient refinement (50 steps, WL+cong only)
         # Recovers congestion quality lost during legalization displacement.
