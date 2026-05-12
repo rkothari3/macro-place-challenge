@@ -40,6 +40,22 @@ try:
 except ImportError:
     _LROUTE_CUDA_EXT = None
 
+# ---------------------------------------------------------------------------
+# Optional CUDA extension for fast density computation
+# ---------------------------------------------------------------------------
+# Build once on the eval server:
+#   cd submissions/analytical_placer/density_ext && pip install -e .
+# Replaces the chunked PyTorch loop with a tiled 2D CUDA kernel using shared memory.
+# For ibm17 (N=2604, G=2244): 11 chunk iters × ~9 ops = ~99 kernel launches → 2 launches.
+_density_ext_dir = _os.path.join(_os.path.dirname(__file__), 'density_ext')
+if _density_ext_dir not in _sys.path:
+    _sys.path.insert(0, _density_ext_dir)
+try:
+    import density_cuda_ext as _DENSITY_CUDA_EXT
+    print("[analytical_placer] CUDA density extension loaded")
+except ImportError:
+    _DENSITY_CUDA_EXT = None
+
 
 # ---------------------------------------------------------------------------
 # Preprocessing: flatten variable-length net_pin_nodes into GPU tensors
@@ -242,6 +258,44 @@ def _make_cell_centers(b: Benchmark, device: torch.device):
     return cell_centers, torch.tensor([cw, ch], dtype=torch.float32, device=device)
 
 
+# ---------------------------------------------------------------------------
+# CUDA density kernel autograd wrapper
+# ---------------------------------------------------------------------------
+
+class _DensityKernel(torch.autograd.Function):
+    """
+    Wraps density_cuda_ext.forward/backward as a differentiable PyTorch op.
+
+    The autograd.Function pattern lets us:
+      - Run a custom CUDA kernel in forward (no Python overhead, no intermediate tensors)
+      - Provide an analytically-derived backward kernel (avoids rebuilding the autograd
+        graph for 99 sequential chunked operations)
+
+    Usage: cell_density = _DensityKernel.apply(pos, sizes, cell_xy, half_cw, half_ch, inv_cell_area)
+    The loss computation (relu, pow, mean) is done in Python with standard autograd.
+    """
+
+    @staticmethod
+    def forward(ctx, pos, sizes, cell_xy, half_cw, half_ch, inv_cell_area):
+        cell_density = _DENSITY_CUDA_EXT.forward(
+            pos, sizes, cell_xy, half_cw, half_ch, inv_cell_area
+        )
+        ctx.save_for_backward(pos, sizes, cell_xy, cell_density)
+        ctx.constants = (half_cw, half_ch, inv_cell_area)
+        return cell_density
+
+    @staticmethod
+    def backward(ctx, grad_cell_density):
+        pos, sizes, cell_xy, cell_density = ctx.saved_tensors
+        half_cw, half_ch, inv_cell_area = ctx.constants
+        grad_pos = _DENSITY_CUDA_EXT.backward(
+            grad_cell_density.contiguous(), pos, sizes, cell_xy,
+            half_cw, half_ch, inv_cell_area
+        )
+        # Return None for sizes, cell_xy, half_cw, half_ch, inv_cell_area (not differentiable inputs)
+        return grad_pos, None, None, None, None, None
+
+
 def density_loss(
     pos: torch.Tensor,
     sizes: torch.Tensor,
@@ -254,13 +308,29 @@ def density_loss(
     """
     Differentiable density penalty using exact rectangle overlap.
     cell_density[g] = sum_i (overlap_area(macro_i, cell_g)) / cell_area.
+
+    When density_cuda_ext is available and pos is on CUDA, uses the tiled shared-memory
+    kernel (2 kernel launches: forward + loss). Otherwise falls back to the chunked
+    PyTorch loop (~9 × num_chunks launches).
     """
-    N = pos.shape[0]
-    G = cell_centers.shape[0]
     half_cw = cell_size[0] / 2
     half_ch = cell_size[1] / 2
     cell_area = cell_size[0] * cell_size[1]
 
+    if _DENSITY_CUDA_EXT is not None and pos.device.type == 'cuda':
+        # Fast path: single CUDA kernel launch with shared-memory tiling
+        half_cw_f = half_cw.item()
+        half_ch_f = half_ch.item()
+        inv_cell_area_f = 1.0 / cell_area.item()
+        cell_density = _DensityKernel.apply(
+            pos, sizes, cell_centers, half_cw_f, half_ch_f, inv_cell_area_f
+        )
+        overflow = F.relu(cell_density - target_density)
+        return overflow.pow(2).mean()
+
+    # Fallback: chunked PyTorch loop (CPU or no CUDA ext)
+    N = pos.shape[0]
+    G = cell_centers.shape[0]
     gx = cell_centers[:, 0]
     gy = cell_centers[:, 1]
 
