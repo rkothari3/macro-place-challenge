@@ -22,6 +22,24 @@ import torch.nn.functional as F
 
 from macro_place.benchmark import Benchmark
 
+# ---------------------------------------------------------------------------
+# Optional CUDA extension for fast L-route demand computation
+# ---------------------------------------------------------------------------
+# Build once on the eval server:
+#   cd submissions/analytical_placer/lroute_ext && pip install -e .
+# When loaded, forward+backward run in O(E×avg_span) instead of O(E×C/R).
+# For ibm17 (E≈130k, avg_span≈7 vs C=51) this is ~7x faster per step,
+# enabling TOTAL_STEPS=1000 instead of 300 in the same wall-clock budget.
+import os as _os, sys as _sys
+_lroute_ext_dir = _os.path.join(_os.path.dirname(__file__), 'lroute_ext')
+if _lroute_ext_dir not in _sys.path:
+    _sys.path.insert(0, _lroute_ext_dir)
+try:
+    import lroute_cuda_ext as _LROUTE_CUDA_EXT
+    print("[analytical_placer] CUDA L-route extension loaded")
+except ImportError:
+    _LROUTE_CUDA_EXT = None
+
 
 # ---------------------------------------------------------------------------
 # Preprocessing: flatten variable-length net_pin_nodes into GPU tensors
@@ -362,6 +380,45 @@ def rudy_congestion_loss(
 # L-route differentiable congestion surrogate (matches plc_client_os.py semantics)
 # ---------------------------------------------------------------------------
 
+class _LRouteDemand(torch.autograd.Function):
+    """
+    Custom autograd Function wrapping the CUDA L-route extension.
+
+    forward:  calls lroute_cuda_ext.forward  — O(E × avg_span) atomicAdd kernels
+    backward: calls lroute_cuda_ext.backward — O(E × avg_span) gradient kernels
+
+    Gradient derivation (H demand, symmetric for V):
+      H_demand[row_lo,c] += w * (1-frac_y) * ov_c
+      H_demand[row_hi,c] += w * frac_y     * ov_c
+      where frac_y = frac(sy/ch), ov_c = col overlap fraction
+
+      d/d(sy):    g_sy = (w/ch) * sum_c ov_c * (gH[row_hi,c] - gH[row_lo,c])
+      d/d(x_min): -1/cw at leftmost column (when x_min is inside that column)
+      d/d(x_max): +1/cw at rightmost column (when x_max is inside that column)
+    """
+    @staticmethod
+    def forward(ctx, src_x, src_y, snk_x, snk_y, edge_wt, R, C, cw, ch):
+        H, V = _LROUTE_CUDA_EXT.forward(
+            src_x.contiguous(), src_y.contiguous(),
+            snk_x.contiguous(), snk_y.contiguous(),
+            edge_wt.contiguous(), R, C, float(cw), float(ch)
+        )
+        ctx.save_for_backward(src_x, src_y, snk_x, snk_y, edge_wt)
+        ctx.R, ctx.C, ctx.cw, ctx.ch = R, C, cw, ch
+        return H, V
+
+    @staticmethod
+    def backward(ctx, grad_H, grad_V):
+        src_x, src_y, snk_x, snk_y, edge_wt = ctx.saved_tensors
+        R, C, cw, ch = ctx.R, ctx.C, ctx.cw, ctx.ch
+        g_sx, g_sy, g_kx, g_ky = _LROUTE_CUDA_EXT.backward(
+            src_x, src_y, snk_x, snk_y, edge_wt,
+            grad_H.contiguous(), grad_V.contiguous(),
+            R, C, float(cw), float(ch)
+        )
+        return g_sx, g_sy, g_kx, g_ky, None, None, None, None, None
+
+
 def lroute_congestion_loss(
     pin_xy: torch.Tensor,    # [total_pins, 2] — differentiable pin world coords
     data: dict,              # from _preprocess(), includes edge_src/snk/weights
@@ -409,93 +466,66 @@ def lroute_congestion_loss(
     snk_x = snk_xy[:, 0]   # [E]
     snk_y = snk_xy[:, 1]   # [E]
 
-    # Bounding box for each edge (x_min/x_max for H, y_min/y_max for V)
-    x_min = torch.minimum(src_x, snk_x)   # [E]
-    x_max = torch.maximum(src_x, snk_x)
-    y_min = torch.minimum(src_y, snk_y)
-    y_max = torch.maximum(src_y, snk_y)
-
     # ------------------------------------------------------------------
-    # H DEMAND: horizontal wire at row≈src_y, spanning [x_min, x_max]
+    # Compute H_demand [R, C] and V_demand [R, C]
     #
-    # Row bilinear: src_y determines which two rows receive H demand.
-    #   row_float = src_y / ch
-    #   row_lo = floor(row_float) → gets weight w_lo = 1 - frac
-    #   row_hi = row_lo + 1       → gets weight w_hi = frac
-    # Gradient dw_hi/dsrc_y = 1/ch flows through scatter → H_demand.
-    #
-    # Column overlap: fraction of column c covered by the horizontal wire.
-    #   H_col_overlap[e, c] = relu(min(x_max, col_right_c) - max(x_min, col_left_c)) / cw
-    #   Interior columns: = 1.0 (fully covered) → matches competition's +weight
-    #   Edge columns: < 1.0 (partial) → smooth interpolation
+    # Two paths:
+    #   CUDA ext (when available on GPU): O(E × avg_span) atomicAdd kernels
+    #     — avoids the [E, C] and [E, R] intermediate matrices
+    #     — ~7× faster for ibm17 (E≈130k, avg_span≈7 vs C=51)
+    #     — enables TOTAL_STEPS=1000 in the same wall-clock budget
+    #   PyTorch fallback (CPU or ext not built): existing scatter_add approach
     # ------------------------------------------------------------------
-    row_float = (src_y / ch).clamp(0.0, float(rows))
-    row_lo = row_float.detach().long().clamp(0, rows - 1)   # [E] integer, no grad
-    row_hi = (row_lo + 1).clamp(0, rows - 1)               # [E]
-    row_w_hi = (row_float - row_lo.float()).clamp(0.0, 1.0) # [E] diff w.r.t. src_y
-    row_w_lo = 1.0 - row_w_hi                              # [E]
+    if _LROUTE_CUDA_EXT is not None and device.type == 'cuda':
+        H_demand, V_demand = _LRouteDemand.apply(
+            src_x, src_y, snk_x, snk_y, edge_wt, rows, cols, cw, ch
+        )
+    else:
+        x_min = torch.minimum(src_x, snk_x)
+        x_max = torch.maximum(src_x, snk_x)
+        y_min = torch.minimum(src_y, snk_y)
+        y_max = torch.maximum(src_y, snk_y)
 
-    # Column edges: [1, C]
-    col_left  = (torch.arange(cols, device=device, dtype=torch.float32) * cw).unsqueeze(0)
-    col_right = col_left + cw
+        row_float = (src_y / ch).clamp(0.0, float(rows))
+        row_lo = row_float.detach().long().clamp(0, rows - 1)
+        row_hi = (row_lo + 1).clamp(0, rows - 1)
+        row_w_hi = (row_float - row_lo.float()).clamp(0.0, 1.0)
+        row_w_lo = 1.0 - row_w_hi
 
-    # H column overlap: [E, C] — fraction of column covered by horizontal wire
-    H_col_ov = F.relu(
-        torch.minimum(x_max.unsqueeze(1), col_right) -
-        torch.maximum(x_min.unsqueeze(1), col_left)
-    ) / cw  # [E, C] in [0, 1]
+        col_left  = (torch.arange(cols, device=device, dtype=torch.float32) * cw).unsqueeze(0)
+        col_right = col_left + cw
+        H_col_ov = F.relu(
+            torch.minimum(x_max.unsqueeze(1), col_right) -
+            torch.maximum(x_min.unsqueeze(1), col_left)
+        ) / cw
+        H_lo = edge_wt.unsqueeze(1) * row_w_lo.unsqueeze(1) * H_col_ov
+        H_hi = edge_wt.unsqueeze(1) * row_w_hi.unsqueeze(1) * H_col_ov
+        idx_lo = row_lo.unsqueeze(1).expand(-1, cols)
+        idx_hi = row_hi.unsqueeze(1).expand(-1, cols)
+        H_demand = torch.zeros(rows, cols, device=device, dtype=pin_xy.dtype)
+        H_demand = H_demand.scatter_add(0, idx_lo, H_lo)
+        H_demand = H_demand.scatter_add(0, idx_hi, H_hi)
 
-    # Weighted contributions: [E, C]
-    H_lo = edge_wt.unsqueeze(1) * row_w_lo.unsqueeze(1) * H_col_ov
-    H_hi = edge_wt.unsqueeze(1) * row_w_hi.unsqueeze(1) * H_col_ov
-
-    # Scatter into H_demand [R, C]: for each edge e, add H_lo[e,:] to row row_lo[e]
-    idx_lo = row_lo.unsqueeze(1).expand(-1, cols)  # [E, C]
-    idx_hi = row_hi.unsqueeze(1).expand(-1, cols)  # [E, C]
-    H_demand = torch.zeros(rows, cols, device=device, dtype=pin_xy.dtype)
-    H_demand = H_demand.scatter_add(0, idx_lo, H_lo)
-    H_demand = H_demand.scatter_add(0, idx_hi, H_hi)
-
-    # ------------------------------------------------------------------
-    # V DEMAND: vertical wire at col≈snk_x, spanning [y_min, y_max]
-    #
-    # Column bilinear: snk_x determines which two columns receive V demand.
-    #   col_float = snk_x / cw
-    #   col_lo = floor(col_float) → weight w_lo = 1 - frac
-    #   col_hi = col_lo + 1       → weight w_hi = frac
-    #
-    # Row overlap: fraction of row r covered by the vertical wire.
-    #   V_row_ov[e, r] = relu(min(y_max, row_top_r) - max(y_min, row_bot_r)) / ch
-    # ------------------------------------------------------------------
-    col_float = (snk_x / cw).clamp(0.0, float(cols))
-    col_lo = col_float.detach().long().clamp(0, cols - 1)   # [E]
-    col_hi = (col_lo + 1).clamp(0, cols - 1)               # [E]
-    col_w_hi = (col_float - col_lo.float()).clamp(0.0, 1.0) # [E]
-    col_w_lo = 1.0 - col_w_hi
-
-    # Row edges: [1, R]
-    row_bot = (torch.arange(rows, device=device, dtype=torch.float32) * ch).unsqueeze(0)
-    row_top = row_bot + ch
-
-    # V row overlap: [E, R]
-    V_row_ov = F.relu(
-        torch.minimum(y_max.unsqueeze(1), row_top) -
-        torch.maximum(y_min.unsqueeze(1), row_bot)
-    ) / ch  # [E, R] in [0, 1]
-
-    # Contributions [E, R]:
-    V_lo = edge_wt.unsqueeze(1) * col_w_lo.unsqueeze(1) * V_row_ov
-    V_hi = edge_wt.unsqueeze(1) * col_w_hi.unsqueeze(1) * V_row_ov
-
-    # Scatter into V_demand [R, C] along column dimension:
-    # V_demand[r, col_lo[e]] += V_lo[e, r]  →  after transpose: [R, E] into [R, C]
-    V_lo_t = V_lo.t()   # [R, E]
-    V_hi_t = V_hi.t()   # [R, E]
-    c_lo_exp = col_lo.unsqueeze(0).expand(rows, -1)   # [R, E]
-    c_hi_exp = col_hi.unsqueeze(0).expand(rows, -1)   # [R, E]
-    V_demand = torch.zeros(rows, cols, device=device, dtype=pin_xy.dtype)
-    V_demand = V_demand.scatter_add(1, c_lo_exp, V_lo_t)
-    V_demand = V_demand.scatter_add(1, c_hi_exp, V_hi_t)
+        col_float = (snk_x / cw).clamp(0.0, float(cols))
+        col_lo = col_float.detach().long().clamp(0, cols - 1)
+        col_hi = (col_lo + 1).clamp(0, cols - 1)
+        col_w_hi = (col_float - col_lo.float()).clamp(0.0, 1.0)
+        col_w_lo = 1.0 - col_w_hi
+        row_bot = (torch.arange(rows, device=device, dtype=torch.float32) * ch).unsqueeze(0)
+        row_top = row_bot + ch
+        V_row_ov = F.relu(
+            torch.minimum(y_max.unsqueeze(1), row_top) -
+            torch.maximum(y_min.unsqueeze(1), row_bot)
+        ) / ch
+        V_lo = edge_wt.unsqueeze(1) * col_w_lo.unsqueeze(1) * V_row_ov
+        V_hi = edge_wt.unsqueeze(1) * col_w_hi.unsqueeze(1) * V_row_ov
+        V_lo_t = V_lo.t()
+        V_hi_t = V_hi.t()
+        c_lo_exp = col_lo.unsqueeze(0).expand(rows, -1)
+        c_hi_exp = col_hi.unsqueeze(0).expand(rows, -1)
+        V_demand = torch.zeros(rows, cols, device=device, dtype=pin_xy.dtype)
+        V_demand = V_demand.scatter_add(1, c_lo_exp, V_lo_t)
+        V_demand = V_demand.scatter_add(1, c_hi_exp, V_hi_t)
 
     # ------------------------------------------------------------------
     # Normalize by routing supply
@@ -1097,7 +1127,9 @@ class AnalyticalPlacer:
         #   reducing OVL_W to 5 in phase 2 allowed congestion gradient to recreate
         #   small overlaps → 20-51x slower legalization. Keep OVL_W = 20 always.
         # ------------------------------------------------------------------
-        TOTAL_STEPS    = 300
+        # 1000 steps when CUDA L-route ext is loaded (~7× faster per step → same wall clock)
+        # 300 steps on CPU / plain PyTorch path
+        TOTAL_STEPS    = 1000 if (_LROUTE_CUDA_EXT is not None and device.type == 'cuda') else 300
         ALPHA_START    = 10.0
         ALPHA_END      = 30.0
         DEN_W_PHASE1   = 2.0    # strong cell density penalty
@@ -1118,6 +1150,7 @@ class AnalyticalPlacer:
 
         best_loss    = float("inf")
         best_movable = pos_movable.detach().clone()
+        measured_cong_100 = 0.0   # filled at step PHASE2_START-1, used for SA restart decision
 
         cw, ch = b.canvas_width, b.canvas_height
         half_w = sizes[:, 0] / 2
@@ -1175,6 +1208,7 @@ class AnalyticalPlacer:
                     pxy_meas = _compute_pin_xy(p_meas, data, b, port_pos)
                     cong_100 = lroute_congestion_loss(pxy_meas, data, b, device).item()
                 CONG_W_PHASE2 = min(0.30, max(0.10, 0.10 + 0.20 * (cong_100 - 1.2) / 0.6))
+                measured_cong_100 = cong_100
                 print(f"  [adaptive] cong_100={cong_100:.4f} → CONG_W_PHASE2={CONG_W_PHASE2:.3f}")
 
             l = loss.item()
@@ -1203,11 +1237,44 @@ class AnalyticalPlacer:
         # print("[analytical_placer] Post-legalization gradient refinement (50 steps)...")
         # final_pos = _post_legalize_refine(final_pos, b, data, device, steps=50, cong_w=0.5)
 
-        # Phase 5: SA refinement using fast L1 WL (CPU, ~0.1ms/eval vs 10ms)
-        print("[analytical_placer] SA refinement (fast WL, 30s budget)...")
-        final_pos = _sa_refinement(
-            final_pos, b, data, device,
-            max_iters=3000, time_budget_s=30.0
-        )
+        # Phase 5: SA refinement — multiple restarts for high-congestion benchmarks.
+        # ibm02/ibm06/ibm15/ibm18 have cong_100 > 2.3 and score above 1.4; a single
+        # SA run can get stuck. 3 × 30s = 90s extra per benchmark, worth the trade.
+        n_sa_trials = 3 if measured_cong_100 > 2.3 else 1
+        if n_sa_trials > 1:
+            print(f"[analytical_placer] SA refinement ({n_sa_trials} restarts × 30s, cong_100={measured_cong_100:.2f})...")
+        else:
+            print("[analytical_placer] SA refinement (fast WL, 30s budget)...")
+
+        # Fast L1 WL cost for comparing SA trial results
+        _powner  = data["pin_owner"].cpu()
+        _esrc    = data["edge_src_idx"].cpu()
+        _esnk    = data["edge_snk_idx"].cpu()
+        _ewt     = data["edge_weights"].cpu()
+        _portpos = b.port_positions  # [P, 2] CPU
+
+        def _eval_wl(pos_cpu: torch.Tensor) -> float:
+            p_ext = torch.cat([pos_cpu, _portpos], dim=0) if _portpos.shape[0] > 0 else pos_cpu
+            mi = p_ext.shape[0] - 1
+            s = p_ext[_powner[_esrc].clamp(0, mi)]
+            k = p_ext[_powner[_esnk].clamp(0, mi)]
+            return (_ewt * (s - k).abs().sum(1)).sum().item()
+
+        best_sa_pos  = None
+        best_sa_cost = float('inf')
+        for trial in range(n_sa_trials):
+            random.seed(trial * 37)
+            torch.manual_seed(trial * 37)
+            trial_pos = _sa_refinement(
+                final_pos, b, data, device,
+                max_iters=3000, time_budget_s=30.0
+            )
+            trial_cost = _eval_wl(trial_pos)
+            if n_sa_trials > 1:
+                print(f"  [SA trial {trial+1}/{n_sa_trials}] wl_cost={trial_cost:.1f}")
+            if trial_cost < best_sa_cost:
+                best_sa_cost = trial_cost
+                best_sa_pos = trial_pos
+        final_pos = best_sa_pos
 
         return final_pos
