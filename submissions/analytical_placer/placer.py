@@ -1197,10 +1197,11 @@ class AnalyticalPlacer:
         print("[analytical_placer] Legalizing hard macros...")
         final_pos = _legalize(analytical_pos, b, time_budget_s=120.0)
 
-        # Phase 4: post-legalization gradient refinement (50 steps, WL+cong only)
-        # Recovers congestion quality lost during legalization displacement.
-        print("[analytical_placer] Post-legalization gradient refinement (50 steps)...")
-        final_pos = _post_legalize_refine(final_pos, b, data, device, steps=50, cong_w=0.5)
+        # Phase 4: post-legalization gradient refinement — DISABLED
+        # cong gradient (cong_w=0.5) caused density to spike (ibm01: 0.576→0.934)
+        # by clustering macros after legalization had spread them cleanly.
+        # print("[analytical_placer] Post-legalization gradient refinement (50 steps)...")
+        # final_pos = _post_legalize_refine(final_pos, b, data, device, steps=50, cong_w=0.5)
 
         # Phase 5: SA refinement using fast L1 WL (CPU, ~0.1ms/eval vs 10ms)
         print("[analytical_placer] SA refinement (fast WL, 30s budget)...")
