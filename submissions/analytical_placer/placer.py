@@ -1127,9 +1127,9 @@ class AnalyticalPlacer:
         #   reducing OVL_W to 5 in phase 2 allowed congestion gradient to recreate
         #   small overlaps → 20-51x slower legalization. Keep OVL_W = 20 always.
         # ------------------------------------------------------------------
-        # 1000 steps when CUDA L-route ext is loaded (~7× faster per step → same wall clock)
-        # 300 steps on CPU / plain PyTorch path
-        TOTAL_STEPS    = 1000 if (_LROUTE_CUDA_EXT is not None and device.type == 'cuda') else 300
+        # 300 steps (fixed): 1000-step runs diverged on hard benchmarks (ibm02 cong 2.4→7.6)
+        # More SA time (60s) compensates for fewer gradient steps.
+        TOTAL_STEPS    = 300
         ALPHA_START    = 10.0
         ALPHA_END      = 30.0
         DEN_W_PHASE1   = 2.0    # strong cell density penalty
@@ -1267,8 +1267,9 @@ class AnalyticalPlacer:
             torch.manual_seed(trial * 37)
             trial_pos = _sa_refinement(
                 final_pos, b, data, device,
-                max_iters=3000, time_budget_s=30.0
+                max_iters=3000, time_budget_s=60.0
             )
+
             trial_cost = _eval_wl(trial_pos)
             if n_sa_trials > 1:
                 print(f"  [SA trial {trial+1}/{n_sa_trials}] wl_cost={trial_cost:.1f}")
