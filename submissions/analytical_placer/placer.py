@@ -39,6 +39,9 @@ try:
     print("[analytical_placer] CUDA L-route extension loaded")
 except ImportError:
     _LROUTE_CUDA_EXT = None
+# Disabled: lroute CUDA backward produces wrong congestion gradients on GPU
+# (congestion increases 1.21→1.71 vs decreasing 1.21→0.78 with PyTorch scatter path)
+_LROUTE_CUDA_EXT = None
 
 # ---------------------------------------------------------------------------
 # Optional CUDA extension for fast density computation
