@@ -553,11 +553,15 @@ def lroute_congestion_loss(
 # Minimal-perturbation legalization (pairwise separation of hard macros only)
 # ---------------------------------------------------------------------------
 
-def _legalize(pos: torch.Tensor, b: Benchmark) -> torch.Tensor:
+def _legalize(pos: torch.Tensor, b: Benchmark, time_budget_s: float = 20.0) -> torch.Tensor:
     """
     Hybrid legalization for hard macros:
     1. Iterative pairwise separation (minimal perturbation, O(N²) per iter)
-    2. Spiral fallback only for macros that still overlap after pairwise phase
+       — capped at time_budget_s to prevent ibm10-style 1188s runtimes
+    2. Spiral fallback for macros still overlapping after pairwise phase
+
+    Time budget: ibm10 (537 macros) at 537²×100 passes = 28.8M checks in Python
+    would take ~576s worst case. Cap at 20s; spiral handles the rest.
     """
     pos = pos.clone()
     sizes    = b.macro_sizes
@@ -573,8 +577,16 @@ def _legalize(pos: torch.Tensor, b: Benchmark) -> torch.Tensor:
         pos[i, 0] = max(hw, min(pos[i, 0].item(), cw - hw))
         pos[i, 1] = max(hh, min(pos[i, 1].item(), ch - hh))
 
-    # Phase 1: pairwise separation
-    for _ in range(100):
+    # Phase 1: pairwise separation with time cap
+    legaliz_start = time.time()
+    pairwise_passes = 0
+    hit_time_cap = False
+    for pass_idx in range(100):
+        if time.time() - legaliz_start > time_budget_s:
+            hit_time_cap = True
+            pairwise_passes = pass_idx
+            break
+        pairwise_passes = pass_idx + 1
         any_overlap = False
         for a in range(len(movable)):
             for bb in range(a + 1, len(movable)):
@@ -600,7 +612,15 @@ def _legalize(pos: torch.Tensor, b: Benchmark) -> torch.Tensor:
                     pos[j, 1] = yj - sy * fj
                 _clamp(i); _clamp(j)
         if not any_overlap:
+            elapsed = time.time() - legaliz_start
+            print(f"  [legalize] pairwise converged in {pairwise_passes} passes ({elapsed:.1f}s)")
             return pos
+
+    elapsed_pw = time.time() - legaliz_start
+    if hit_time_cap:
+        print(f"  [legalize] pairwise TIME CAP after {pairwise_passes} passes ({elapsed_pw:.1f}s) — spiral handles remainder")
+    else:
+        print(f"  [legalize] pairwise {pairwise_passes} passes ({elapsed_pw:.1f}s), moving to spiral")
 
     # Phase 2: spiral fallback for remaining violators
     def _overlaps(i: int, others: list) -> bool:
@@ -647,6 +667,89 @@ def _legalize(pos: torch.Tensor, b: Benchmark) -> torch.Tensor:
             pos[i, 0], pos[i, 1] = ox, oy
 
     return pos
+
+
+# ---------------------------------------------------------------------------
+# Post-legalization gradient refinement
+# ---------------------------------------------------------------------------
+
+def _post_legalize_refine(
+    pos_cpu: torch.Tensor,
+    b: Benchmark,
+    data: dict,
+    device: torch.device,
+    steps: int = 50,
+    cong_w: float = 0.5,
+) -> torch.Tensor:
+    """
+    50-step gradient refinement after legalization.
+
+    Why: legalization resolves overlaps by displacing macros from their
+    gradient-optimal positions. This can push congestion up (macros that
+    were near their connected components get scattered). A short re-run
+    with WL + congestion gradient (no density — macros are already spread)
+    recovers some of the lost quality.
+
+    Uses a soft overlap penalty (OVL_W=5) rather than hard projection.
+    Macros start legal (ovl=0); the small penalty discourages new overlaps
+    without overriding the WL+cong gradient signal.
+
+    Key differences from main gradient:
+      DEN_W = 0   — macros are already spread, no need for density pressure
+      OVL_W = 5   — light touch; macros start legal so ovl starts at 0
+      LR = 0.01   — fine-tuning; smaller than main gradient's 0.05
+      alpha = 50  — sharper HPWL for fine-tuning regime
+    """
+    pos = pos_cpu.clone().to(device)
+    sizes    = b.macro_sizes.to(device)
+    port_pos = b.port_positions.to(device)
+    num_hard = b.num_hard_macros
+    cw, ch   = b.canvas_width, b.canvas_height
+
+    movable     = b.get_movable_mask().to(device)
+    movable_idx = movable.nonzero(as_tuple=True)[0]
+    if len(movable_idx) == 0:
+        return pos_cpu
+
+    half_w = sizes[:, 0] / 2
+    half_h = sizes[:, 1] / 2
+
+    pos_movable = pos[movable_idx].detach().requires_grad_(True)
+    optimizer   = torch.optim.Adam([pos_movable], lr=0.01)
+
+    best_loss    = float("inf")
+    best_movable = pos_movable.detach().clone()
+
+    for _ in range(steps):
+        optimizer.zero_grad()
+
+        p = pos.clone()
+        p[movable_idx] = pos_movable
+        p_x = p[:, 0].clamp(half_w, cw - half_w)
+        p_y = p[:, 1].clamp(half_h, ch - half_h)
+        p   = torch.stack([p_x, p_y], dim=1)
+
+        pin_xy = _compute_pin_xy(p, data, b, port_pos)
+        wl   = lse_hpwl_loss(pin_xy, data, b, alpha=50.0)
+        cong = lroute_congestion_loss(pin_xy, data, b, device)
+        ovl  = macro_overlap_loss(p, sizes, num_hard)
+        loss = wl + cong_w * cong + 5.0 * ovl
+        loss.backward()
+
+        optimizer.step()
+
+        with torch.no_grad():
+            pos_movable[:, 0].clamp_(half_w[movable_idx], cw - half_w[movable_idx])
+            pos_movable[:, 1].clamp_(half_h[movable_idx], ch - half_h[movable_idx])
+
+        l = loss.item()
+        if l < best_loss:
+            best_loss    = l
+            best_movable = pos_movable.detach().clone()
+
+    final = pos.clone()
+    final[movable_idx] = best_movable
+    return final.cpu()
 
 
 # ---------------------------------------------------------------------------
@@ -727,9 +830,13 @@ def _sa_refinement(
     - T_end = 0.0001 × max(cw, ch): small perturbations at end.
     - Geometric cooling: T *= (T_end/T_start)^(1/max_iters) each iteration.
     """
-    pos = pos_cpu.clone().to(device)
-    sizes    = b.macro_sizes.to(device)
-    port_pos = b.port_positions.to(device)
+    # SA runs entirely on CPU — pos never moves to GPU.
+    # Rationale: every `.item()` on a GPU tensor incurs a sync. SA calls overlap
+    # checks (which do many .item() calls) and cost on every iteration. Keeping
+    # pos on CPU eliminates GPU sync overhead and gives ~10-100x more iterations
+    # in the same time budget.
+    pos  = pos_cpu.clone()       # CPU throughout
+    sizes    = b.macro_sizes     # already CPU
     num_hard = b.num_hard_macros
     cw, ch   = b.canvas_width, b.canvas_height
 
@@ -737,23 +844,58 @@ def _sa_refinement(
     if len(movable) < 2:
         return pos_cpu
 
-    cell_centers, cell_size = _make_cell_centers(b, device)
-    half_w = sizes[:, 0] / 2   # [N]
-    half_h = sizes[:, 1] / 2   # [N]
+    half_w = sizes[:, 0] / 2   # [N] CPU
+    half_h = sizes[:, 1] / 2   # [N] CPU
+
+    # Precompute macro-owner indices for each edge endpoint (used in fast WL).
+    # edge_src/snk_idx are flat pin indices; pin_owner maps pin → macro/port owner.
+    # Port owners (>= num_macro) are in b.port_positions; macro owners are in pos.
+    # We build a combined [num_macros + num_ports, 2] lookup at eval time.
+    pin_owner_cpu    = data["pin_owner"].cpu()
+    edge_src_cpu     = data["edge_src_idx"].cpu()
+    edge_snk_cpu     = data["edge_snk_idx"].cpu()
+    edge_wt_cpu      = data["edge_weights"].cpu()
+    edge_src_owner   = pin_owner_cpu[edge_src_cpu]   # [E] macro/port owner of source pin
+    edge_snk_owner   = pin_owner_cpu[edge_snk_cpu]   # [E]
+    port_pos_fixed   = b.port_positions               # [num_ports, 2] CPU, fixed throughout SA
 
     @torch.no_grad()
-    def _cost(p: torch.Tensor) -> float:
-        pin_xy = _compute_pin_xy(p, data, b, port_pos)
-        wl  = lse_hpwl_loss(pin_xy, data, b, alpha=50.0)
-        den = density_loss(p, sizes, cell_centers, cell_size, b, target_density=1.0)
-        return (wl + 0.5 * den).item()
+    def _fast_cost(p: torch.Tensor) -> float:
+        """
+        L1 pairwise wirelength using macro centers (ignores pin offsets).
+        Runs in ~0.1ms on CPU vs ~10ms for full LSE+density surrogate.
+
+        Why L1 pairwise WL is a valid SA objective:
+        - It tracks the same topology as our gradient surrogate: connected macros
+          should be nearby. Minimizing L1 WL finds locally Pareto-improving moves.
+        - Pin offsets (typically <1/4 macro size) barely affect the ranking of moves,
+          so ignoring them costs almost nothing in solution quality.
+        - 100x more iterations in the same budget >> slightly better per-iteration
+          accuracy. At cold SA temperatures, move acceptance is near-deterministic
+          (accept iff ΔCost < 0), so each iteration is a direct improvement.
+
+        What SA loses by not having density/congestion signal:
+        - SA won't explicitly avoid congestion hotspots or dense regions.
+        - This is acceptable: the gradient already handled global WL/density/cong.
+          SA is a fine-tuner for small local improvements, not a global optimizer.
+          Density and congestion change slowly with small macro shifts; WL changes
+          immediately. The WL signal alone guides SA to meaningful improvements.
+        """
+        if port_pos_fixed.shape[0] > 0:
+            p_ext = torch.cat([p, port_pos_fixed], dim=0)   # [N+ports, 2]
+        else:
+            p_ext = p
+        max_idx = p_ext.shape[0] - 1
+        src_pos = p_ext[edge_src_owner.clamp(0, max_idx)]   # [E, 2]
+        snk_pos = p_ext[edge_snk_owner.clamp(0, max_idx)]   # [E, 2]
+        return (edge_wt_cpu * (src_pos - snk_pos).abs().sum(dim=1)).sum().item()
 
     T_canvas = max(cw, ch)
     T       = T_canvas * 0.01
     T_end   = T_canvas * 0.0001
     cooling = (T_end / T) ** (1.0 / max_iters)
 
-    current_cost = _cost(pos)
+    current_cost = _fast_cost(pos)
     best_cost    = current_cost
     best_pos     = pos.clone()
 
@@ -817,7 +959,7 @@ def _sa_refinement(
                 continue
 
         n_tried += 1
-        new_cost = _cost(pos)
+        new_cost = _fast_cost(pos)
         delta    = new_cost - current_cost
 
         if delta < 0 or random.random() < math.exp(-delta / (T + 1e-12)):
@@ -835,8 +977,8 @@ def _sa_refinement(
 
     elapsed = time.time() - start_t
     print(f"  [SA] {last_iter + 1} iters, {n_tried} evals, {n_accepted} accepted  "
-          f"surrogate: {current_cost:.4f} → {best_cost:.4f}  ({elapsed:.1f}s)")
-    return best_pos.cpu()
+          f"fast-WL: {current_cost:.4f} → {best_cost:.4f}  ({elapsed:.1f}s)")
+    return best_pos   # already CPU
 
 
 # ---------------------------------------------------------------------------
@@ -954,7 +1096,7 @@ class AnalyticalPlacer:
         ALPHA_START    = 10.0
         ALPHA_END      = 30.0
         DEN_W_PHASE1   = 2.0    # strong cell density penalty
-        DEN_W_PHASE2   = 0.5    # gentle spreading (raised from 0.4 to resist L-route compression)
+        DEN_W_PHASE2   = 0.5    # keep at 0.5: needed to resist L-route compression → fewer overlaps → faster legalization
         OVL_W_PHASE1   = 20.0   # direct macro-pair overlap penalty
         OVL_W_PHASE2   = 20.0   # NEVER reduce — prevents legalization regression
         CONG_W_PHASE1  = 0.0    # no congestion until overlaps resolve
@@ -1045,12 +1187,17 @@ class AnalyticalPlacer:
         final_gpu[movable_idx] = best_movable
         analytical_pos = final_gpu.cpu()
 
-        # Phase 3: legalize hard macros
+        # Phase 3: legalize hard macros (time-capped at 20s for large benchmarks)
         print("[analytical_placer] Legalizing hard macros...")
-        final_pos = _legalize(analytical_pos, b)
+        final_pos = _legalize(analytical_pos, b, time_budget_s=20.0)
 
-        # Phase 4: SA refinement using WL + density surrogate
-        print("[analytical_placer] SA refinement (WL+density surrogate, 30s budget)...")
+        # Phase 4: post-legalization gradient refinement (50 steps, WL+cong only)
+        # Recovers congestion quality lost during legalization displacement.
+        print("[analytical_placer] Post-legalization gradient refinement (50 steps)...")
+        final_pos = _post_legalize_refine(final_pos, b, data, device, steps=50, cong_w=0.5)
+
+        # Phase 5: SA refinement using fast L1 WL (CPU, ~0.1ms/eval vs 10ms)
+        print("[analytical_placer] SA refinement (fast WL, 30s budget)...")
         final_pos = _sa_refinement(
             final_pos, b, data, device,
             max_iters=3000, time_budget_s=30.0
