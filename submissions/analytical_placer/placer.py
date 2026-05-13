@@ -1229,12 +1229,8 @@ class AnalyticalPlacer:
         half_w = sizes[:, 0] / 2
         half_h = sizes[:, 1] / 2
 
-        # effective_total starts at TOTAL_STEPS but may be extended to TOTAL_STEPS+200
-        # for high-congestion benchmarks (cong_100 > 2.0) at step PHASE2_START-1.
-        effective_total = TOTAL_STEPS
-        print(f"[analytical_placer] Gradient descent ({TOTAL_STEPS} steps, may extend for high-congestion)...")
-        step = 0
-        while step < effective_total:
+        print(f"[analytical_placer] Gradient descent ({TOTAL_STEPS} steps)...")
+        for step in range(TOTAL_STEPS):
             optimizer.zero_grad()
 
             pos = pos_full.clone()
@@ -1244,7 +1240,7 @@ class AnalyticalPlacer:
             pos_y = pos[:, 1].clamp(half_h, ch - half_h)
             pos   = torch.stack([pos_x, pos_y], dim=1)
 
-            frac  = step / effective_total
+            frac  = step / TOTAL_STEPS
             alpha = ALPHA_START + (ALPHA_END - ALPHA_START) * frac
 
             den_w  = DEN_W_PHASE1  if step < PHASE2_START else DEN_W_PHASE2
@@ -1266,10 +1262,7 @@ class AnalyticalPlacer:
 
             torch.nn.utils.clip_grad_norm_([pos_movable], GRAD_CLIP)
             optimizer.step()
-            # Cap scheduler to T_max steps — past that, cosine would start rising again.
-            # Extra steps (300-499 for high-congestion benchmarks) run at eta_min=0.005.
-            if step < TOTAL_STEPS:
-                scheduler.step()
+            scheduler.step()
 
             with torch.no_grad():
                 pos_movable[:, 0].clamp_(half_w[movable_idx], cw - half_w[movable_idx])
@@ -1279,8 +1272,6 @@ class AnalyticalPlacer:
             # Low-congestion benchmarks (ibm09/ibm11) regressed with CONG_W=0.3 because
             # L-route compressed macros that were already well-spread → density spike.
             # Formula: scale from 0.10 (cong_100≤1.2) to 0.30 (cong_100≥1.8).
-            # PAINPOINT 2: extend to 500 steps when cong_100 > 2.0 — hard benchmarks
-            # (ibm02/06/15/18) need more gradient steps to resolve structural congestion.
             if step == PHASE2_START - 1:
                 with torch.no_grad():
                     p_meas = pos_full.clone()
@@ -1292,9 +1283,6 @@ class AnalyticalPlacer:
                 CONG_W_PHASE2 = min(0.30, max(0.10, 0.10 + 0.20 * (cong_100 - 1.2) / 0.6))
                 measured_cong_100 = cong_100
                 print(f"  [adaptive] cong_100={cong_100:.4f} → CONG_W_PHASE2={CONG_W_PHASE2:.3f}")
-                if cong_100 > 2.0:
-                    effective_total = TOTAL_STEPS + 200
-                    print(f"  [adaptive] cong_100={cong_100:.4f} > 2.0 → extending to {effective_total} steps")
 
             l = loss.item()
             if l < best_loss:
@@ -1305,8 +1293,6 @@ class AnalyticalPlacer:
                 print(f"  step {step:4d}  loss={l:.4f}  wl={wl.item():.4f}  "
                       f"den={den.item():.6f}  cong={cong.item():.4f}  "
                       f"den_w={den_w:.2f}  cong_w={cong_w:.2f}  alpha={alpha:.1f}")
-
-            step += 1
 
         # Reconstruct and move to CPU
         final_gpu = pos_full.clone()
