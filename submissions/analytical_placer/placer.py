@@ -1208,7 +1208,7 @@ class AnalyticalPlacer:
         DEN_W_PHASE1   = 2.0    # strong cell density penalty
         DEN_W_PHASE2   = 0.5    # keep at 0.5: needed to resist L-route compression → fewer overlaps → faster legalization
         OVL_W_PHASE1   = 20.0   # direct macro-pair overlap penalty
-        OVL_W_PHASE2   = 20.0   # NEVER reduce — prevents legalization regression
+        OVL_W_PHASE2   = 50.0   # stronger than phase1: fewer overlaps entering legalization
         CONG_W_PHASE1  = 0.0    # no congestion until overlaps resolve
         CONG_W_PHASE2  = 0.3    # L-route surrogate; overridden adaptively at step PHASE2_START-1
         PHASE2_START   = 100
@@ -1229,8 +1229,12 @@ class AnalyticalPlacer:
         half_w = sizes[:, 0] / 2
         half_h = sizes[:, 1] / 2
 
-        print(f"[analytical_placer] Gradient descent ({TOTAL_STEPS} steps)...")
-        for step in range(TOTAL_STEPS):
+        # effective_total starts at TOTAL_STEPS but may be extended to TOTAL_STEPS+200
+        # for high-congestion benchmarks (cong_100 > 2.0) at step PHASE2_START-1.
+        effective_total = TOTAL_STEPS
+        print(f"[analytical_placer] Gradient descent ({TOTAL_STEPS} steps, may extend for high-congestion)...")
+        step = 0
+        while step < effective_total:
             optimizer.zero_grad()
 
             pos = pos_full.clone()
@@ -1240,7 +1244,7 @@ class AnalyticalPlacer:
             pos_y = pos[:, 1].clamp(half_h, ch - half_h)
             pos   = torch.stack([pos_x, pos_y], dim=1)
 
-            frac  = step / TOTAL_STEPS
+            frac  = step / effective_total
             alpha = ALPHA_START + (ALPHA_END - ALPHA_START) * frac
 
             den_w  = DEN_W_PHASE1  if step < PHASE2_START else DEN_W_PHASE2
@@ -1262,7 +1266,10 @@ class AnalyticalPlacer:
 
             torch.nn.utils.clip_grad_norm_([pos_movable], GRAD_CLIP)
             optimizer.step()
-            scheduler.step()
+            # Cap scheduler to T_max steps — past that, cosine would start rising again.
+            # Extra steps (300-499 for high-congestion benchmarks) run at eta_min=0.005.
+            if step < TOTAL_STEPS:
+                scheduler.step()
 
             with torch.no_grad():
                 pos_movable[:, 0].clamp_(half_w[movable_idx], cw - half_w[movable_idx])
@@ -1272,6 +1279,8 @@ class AnalyticalPlacer:
             # Low-congestion benchmarks (ibm09/ibm11) regressed with CONG_W=0.3 because
             # L-route compressed macros that were already well-spread → density spike.
             # Formula: scale from 0.10 (cong_100≤1.2) to 0.30 (cong_100≥1.8).
+            # PAINPOINT 2: extend to 500 steps when cong_100 > 2.0 — hard benchmarks
+            # (ibm02/06/15/18) need more gradient steps to resolve structural congestion.
             if step == PHASE2_START - 1:
                 with torch.no_grad():
                     p_meas = pos_full.clone()
@@ -1283,6 +1292,9 @@ class AnalyticalPlacer:
                 CONG_W_PHASE2 = min(0.30, max(0.10, 0.10 + 0.20 * (cong_100 - 1.2) / 0.6))
                 measured_cong_100 = cong_100
                 print(f"  [adaptive] cong_100={cong_100:.4f} → CONG_W_PHASE2={CONG_W_PHASE2:.3f}")
+                if cong_100 > 2.0:
+                    effective_total = TOTAL_STEPS + 200
+                    print(f"  [adaptive] cong_100={cong_100:.4f} > 2.0 → extending to {effective_total} steps")
 
             l = loss.item()
             if l < best_loss:
@@ -1294,10 +1306,33 @@ class AnalyticalPlacer:
                       f"den={den.item():.6f}  cong={cong.item():.4f}  "
                       f"den_w={den_w:.2f}  cong_w={cong_w:.2f}  alpha={alpha:.1f}")
 
+            step += 1
+
         # Reconstruct and move to CPU
         final_gpu = pos_full.clone()
         final_gpu[movable_idx] = best_movable
         analytical_pos = final_gpu.cpu()
+
+        # PAINPOINT 3 diagnostic: count overlapping hard macro pairs entering legalization.
+        # High counts (>50) explain why pairwise separation needs 100+ passes.
+        # Target: <20 pairs with OVL_W=50 in phase2.
+        with torch.no_grad():
+            num_hard = b.num_hard_macros
+            p_diag = final_gpu[:num_hard]
+            sz_diag = sizes[:num_hard]
+            gap = 0.02
+            x_d = p_diag[:, 0]; y_d = p_diag[:, 1]
+            hw_d = sz_diag[:, 0] / 2 + gap / 2
+            hh_d = sz_diag[:, 1] / 2 + gap / 2
+            dx_d = (x_d.unsqueeze(0) - x_d.unsqueeze(1)).abs()
+            dy_d = (y_d.unsqueeze(0) - y_d.unsqueeze(1)).abs()
+            px_d = F.relu(hw_d.unsqueeze(0) + hw_d.unsqueeze(1) - dx_d)
+            py_d = F.relu(hh_d.unsqueeze(0) + hh_d.unsqueeze(1) - dy_d)
+            mask_triu = torch.triu(torch.ones(num_hard, num_hard, device=device, dtype=torch.bool), diagonal=1)
+            n_ovl_pairs = int(((px_d > 0) & (py_d > 0))[mask_triu].sum().item())
+            total_pairs = num_hard * (num_hard - 1) // 2
+            print(f"  [pre-legalize] overlapping hard macro pairs: {n_ovl_pairs} / {total_pairs} "
+                  f"({100.0*n_ovl_pairs/max(1,total_pairs):.1f}%)")
 
         # Phase 3: legalize hard macros (120s cap — most benchmarks converge well
         # within this; only ibm10's ~1100s extreme case gets truncated)
