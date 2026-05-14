@@ -2,15 +2,10 @@
 Analytical global placer: LSE-HPWL + density + L-route congestion surrogate
 Optimization: Adam gradient descent → greedy spiral legalization → SA refinement
 
-Pin resolution (from net_pin_nodes col0 = owner index):
-  [0, num_hard)           hard macro → placement[owner] + macro_pin_offsets[owner][slot]
-  [num_hard, num_macro)   soft macro → placement[owner] (center, slot always 0)
+Pin resolution:
+  [0, num_hard)           hard macro → pos[owner] + macro_pin_offsets[owner][slot]
+  [num_hard, num_macro)   soft macro → pos[owner] (center)
   [num_macro, ...)        I/O port   → port_positions[owner - num_macro] (fixed)
-
-Congestion surrogate: L-route (not RUDY).
-  RUDY spreads demand over bbox AREA → gradient opposes competition (longer L-routes).
-  L-route traces H+V segments → gradient correctly pushes pins closer.
-  See findings.md section T for full formula derivation.
 """
 from __future__ import annotations
 
@@ -372,70 +367,6 @@ def macro_overlap_loss(
 
 
 # ---------------------------------------------------------------------------
-# RUDY congestion surrogate (kept for reference; NOT used in gradient loop)
-# ---------------------------------------------------------------------------
-
-def rudy_congestion_loss(
-    pin_xy: torch.Tensor,
-    data: dict,
-    b: Benchmark,
-    device: torch.device,
-) -> torch.Tensor:
-    """
-    RUDY differentiable congestion surrogate (bbox-uniform demand distribution).
-
-    NOT used in the main gradient loop because RUDY's gradient OPPOSES the
-    competition's L-route gradient for already-spread placements:
-    - RUDY rewards larger bboxes (lower per-cell demand) → pushes macros apart
-    - L-route penalizes longer wires (more edge crossings) → pulls macros closer
-
-    Kept here for reference / comparison. Use lroute_congestion_loss() instead.
-    """
-    rows = b.grid_rows
-    cols = b.grid_cols
-    cw = b.canvas_width / cols
-    ch = b.canvas_height / rows
-    num_nets = data["num_nets"]
-    net_idx  = data["pin_net_idx"]
-    net_weights = b.net_weights.to(device)
-
-    x = pin_xy[:, 0]
-    y = pin_xy[:, 1]
-    alpha = 50.0
-
-    net_x_max =  _scatter_lse( x, net_idx, num_nets, alpha)
-    net_x_min = -_scatter_lse(-x, net_idx, num_nets, alpha)
-    net_y_max =  _scatter_lse( y, net_idx, num_nets, alpha)
-    net_y_min = -_scatter_lse(-y, net_idx, num_nets, alpha)
-
-    bbox_w = (net_x_max - net_x_min).clamp(min=cw * 0.5)
-    bbox_h = (net_y_max - net_y_min).clamp(min=ch * 0.5)
-    routing_density = net_weights / (bbox_w * bbox_h)
-
-    col_left  = torch.arange(cols, device=device, dtype=torch.float32).unsqueeze(0) * cw
-    col_right = col_left + cw
-    row_bot   = torch.arange(rows, device=device, dtype=torch.float32).unsqueeze(0) * ch
-    row_top   = row_bot + ch
-
-    xmin = net_x_min.unsqueeze(1); xmax = net_x_max.unsqueeze(1)
-    ymin = net_y_min.unsqueeze(1); ymax = net_y_max.unsqueeze(1)
-
-    overlap_x = F.relu(torch.minimum(xmax, col_right) - torch.maximum(xmin, col_left))
-    overlap_y = F.relu(torch.minimum(ymax, row_top)   - torch.maximum(ymin, row_bot))
-
-    scaled_x = routing_density.unsqueeze(1) * overlap_x
-    demand   = overlap_y.t() @ scaled_x
-
-    h_supply = float(b.hroutes_per_micron) * ch
-    v_supply = float(b.vroutes_per_micron) * cw
-    avg_supply = (h_supply + v_supply) / 2.0
-
-    demand_flat = demand.flatten() / avg_supply
-    G = rows * cols
-    k = max(1, int(0.05 * G))
-    return torch.topk(demand_flat, k).values.mean()
-
-
 # ---------------------------------------------------------------------------
 # L-route differentiable congestion surrogate (matches plc_client_os.py semantics)
 # ---------------------------------------------------------------------------
@@ -890,46 +821,9 @@ def _sa_refinement(
     max_iters: int = 3000,
     time_budget_s: float = 30.0,
 ) -> torch.Tensor:
-    """
-    SA refinement using WL + density surrogate objective.
-
-    Why SA after gradient descent?
-    - Gradient descent finds a good basin in a continuous landscape but gets
-      stuck in local minima because Adam is a first-order method.
-    - SA accepts bad moves with probability exp(-ΔCost/T), allowing escape
-      from local minima. At low T (cold start), it mostly accepts improvements.
-    - Starting cold (T = 0.01 × canvas_max) preserves the gradient solution's
-      quality while allowing micro-corrections.
-
-    Why use WL+density surrogate instead of full plc proxy?
-    - plc.get_congestion_cost() is O(nets × grid) in pure Python: ~0.5-2s/call.
-      With 30s budget, this gives only ~15-60 SA iterations — nearly nothing.
-    - Our torch surrogate evaluates in ~5ms: gives 3000-6000 iterations in 30s.
-    - WL+density covers 67% of the proxy cost (0.5×density is the biggest term
-      in high-utilization benchmarks). SA on 67% of objective >> SA on 100% with
-      15 iterations.
-
-    Why neighbor-biased swaps?
-    - Random swaps often propose moves that are far from the current basin
-      and get rejected. Neighbor-biased swaps try nearby macros first,
-      which have higher acceptance rates and produce more meaningful moves.
-      At high T: random swaps dominate (exploration). At low T: neighbor
-      swaps dominate (local refinement). We use 70/30 split.
-
-    Temperature schedule:
-    - T_start = 0.01 × max(cw, ch): much lower than will_seed's 0.15.
-      We start from a good gradient-descent solution, not random.
-      High T_start would destroy the gradient's work by accepting random moves.
-    - T_end = 0.0001 × max(cw, ch): small perturbations at end.
-    - Geometric cooling: T *= (T_end/T_start)^(1/max_iters) each iteration.
-    """
-    # SA runs entirely on CPU — pos never moves to GPU.
-    # Rationale: every `.item()` on a GPU tensor incurs a sync. SA calls overlap
-    # checks (which do many .item() calls) and cost on every iteration. Keeping
-    # pos on CPU eliminates GPU sync overhead and gives ~10-100x more iterations
-    # in the same time budget.
-    pos  = pos_cpu.clone()       # CPU throughout
-    sizes    = b.macro_sizes     # already CPU
+    """SA refinement: L1 WL cost, cold-start, neighbor-biased shifts+swaps."""
+    pos  = pos_cpu.clone()
+    sizes    = b.macro_sizes
     num_hard = b.num_hard_macros
     cw, ch   = b.canvas_width, b.canvas_height
 
@@ -937,43 +831,19 @@ def _sa_refinement(
     if len(movable) < 2:
         return pos_cpu
 
-    half_w = sizes[:, 0] / 2   # [N] CPU
-    half_h = sizes[:, 1] / 2   # [N] CPU
+    half_w = sizes[:, 0] / 2
+    half_h = sizes[:, 1] / 2
 
-    # Precompute macro-owner indices for each edge endpoint (used in fast WL).
-    # edge_src/snk_idx are flat pin indices; pin_owner maps pin → macro/port owner.
-    # Port owners (>= num_macro) are in b.port_positions; macro owners are in pos.
-    # We build a combined [num_macros + num_ports, 2] lookup at eval time.
     pin_owner_cpu    = data["pin_owner"].cpu()
     edge_src_cpu     = data["edge_src_idx"].cpu()
     edge_snk_cpu     = data["edge_snk_idx"].cpu()
     edge_wt_cpu      = data["edge_weights"].cpu()
-    edge_src_owner   = pin_owner_cpu[edge_src_cpu]   # [E] macro/port owner of source pin
-    edge_snk_owner   = pin_owner_cpu[edge_snk_cpu]   # [E]
-    port_pos_fixed   = b.port_positions               # [num_ports, 2] CPU, fixed throughout SA
+    edge_src_owner   = pin_owner_cpu[edge_src_cpu]
+    edge_snk_owner   = pin_owner_cpu[edge_snk_cpu]
+    port_pos_fixed   = b.port_positions
 
     @torch.no_grad()
     def _fast_cost(p: torch.Tensor) -> float:
-        """
-        L1 pairwise wirelength using macro centers (ignores pin offsets).
-        Runs in ~0.1ms on CPU vs ~10ms for full LSE+density surrogate.
-
-        Why L1 pairwise WL is a valid SA objective:
-        - It tracks the same topology as our gradient surrogate: connected macros
-          should be nearby. Minimizing L1 WL finds locally Pareto-improving moves.
-        - Pin offsets (typically <1/4 macro size) barely affect the ranking of moves,
-          so ignoring them costs almost nothing in solution quality.
-        - 100x more iterations in the same budget >> slightly better per-iteration
-          accuracy. At cold SA temperatures, move acceptance is near-deterministic
-          (accept iff ΔCost < 0), so each iteration is a direct improvement.
-
-        What SA loses by not having density/congestion signal:
-        - SA won't explicitly avoid congestion hotspots or dense regions.
-        - This is acceptable: the gradient already handled global WL/density/cong.
-          SA is a fine-tuner for small local improvements, not a global optimizer.
-          Density and congestion change slowly with small macro shifts; WL changes
-          immediately. The WL signal alone guides SA to meaningful improvements.
-        """
         if port_pos_fixed.shape[0] > 0:
             p_ext = torch.cat([p, port_pos_fixed], dim=0)   # [N+ports, 2]
         else:
@@ -1075,71 +945,6 @@ def _sa_refinement(
 
 
 # ---------------------------------------------------------------------------
-# Soft macro force-directed refinement (unused — kept for future experiments)
-# ---------------------------------------------------------------------------
-
-def _soft_macro_fd(pos: torch.Tensor, b: Benchmark, steps: int = 300) -> torch.Tensor:
-    """Force-directed placement for soft macros. Currently not called."""
-    pos = pos.clone()
-    num_hard  = b.num_hard_macros
-    num_macro = b.num_macros
-    cw, ch = b.canvas_width, b.canvas_height
-
-    soft_idx = [i for i in range(num_hard, num_macro) if not b.macro_fixed[i].item()]
-    if not soft_idx:
-        return pos
-
-    soft_adj: dict[int, list[tuple[int, float]]] = {i: [] for i in soft_idx}
-    for net_i, nodes in enumerate(b.net_nodes):
-        w = float(b.net_weights[net_i].item())
-        node_list = nodes.tolist()
-        for ni in node_list:
-            if ni >= num_hard and ni < num_macro:
-                for nj in node_list:
-                    if nj != ni:
-                        soft_adj[ni].append((nj, w))
-
-    hard_rep = [(b.macro_sizes[j, 0].item() + b.macro_sizes[j, 1].item()) / 2
-                for j in range(num_hard)]
-
-    T = max(cw, ch) * 0.01
-    cooling = 0.97
-
-    for _ in range(steps):
-        for i in soft_idx:
-            fx, fy = 0.0, 0.0
-            xi, yi = pos[i, 0].item(), pos[i, 1].item()
-            for j, w in soft_adj[i]:
-                if j < num_macro:
-                    xj, yj = pos[j, 0].item(), pos[j, 1].item()
-                else:
-                    port_j = j - num_macro
-                    if port_j < b.port_positions.shape[0]:
-                        xj, yj = b.port_positions[port_j, 0].item(), b.port_positions[port_j, 1].item()
-                    else:
-                        continue
-                dx, dy = xj - xi, yj - yi
-                dist = math.sqrt(dx * dx + dy * dy) + 1e-6
-                fx += w * dx / dist; fy += w * dy / dist
-            for j in range(num_hard):
-                xj, yj = pos[j, 0].item(), pos[j, 1].item()
-                dx, dy = xi - xj, yi - yj
-                dist = math.sqrt(dx * dx + dy * dy) + 1e-6
-                rep = hard_rep[j]
-                if dist < rep * 2.5:
-                    s = rep * rep / (dist * dist + 1e-6)
-                    fx += s * dx / dist; fy += s * dy / dist
-            norm = math.sqrt(fx * fx + fy * fy) + 1e-6
-            scale = min(T, norm) / norm
-            xi = max(b.macro_sizes[i, 0].item() / 2, min(xi + fx * scale, cw - b.macro_sizes[i, 0].item() / 2))
-            yi = max(b.macro_sizes[i, 1].item() / 2, min(yi + fy * scale, ch - b.macro_sizes[i, 1].item() / 2))
-            pos[i, 0] = xi; pos[i, 1] = yi
-        T *= cooling
-
-    return pos
-
-
-# ---------------------------------------------------------------------------
 # Main placer class
 # ---------------------------------------------------------------------------
 
@@ -1171,31 +976,15 @@ class AnalyticalPlacer:
         pos_full    = b.macro_positions.clone().to(device)
         pos_movable = pos_full[movable_idx].detach().requires_grad_(True)
 
-        # ------------------------------------------------------------------
-        # Hyperparameters
-        #
-        # CONG_W phases:
-        #   Phase 1 (steps 0-99): CONG_W = 0 — let density+overlap resolve first.
-        #     Adding congestion before overlaps are gone causes the L-route gradient
-        #     to fight the overlap penalty → unstable optimization.
-        #   Phase 2 (steps 100-299): CONG_W = 0.3 — L-route gradient pulls macros
-        #     into low-congestion configurations. Start AFTER overlaps ≈ 0.
-        #
-        # OVL_W = 20 throughout: RUDY's regression (Session 2) showed that
-        #   reducing OVL_W to 5 in phase 2 allowed congestion gradient to recreate
-        #   small overlaps → 20-51x slower legalization. Keep OVL_W = 20 always.
-        # ------------------------------------------------------------------
-        # 300 steps (fixed): 1000-step runs diverged on hard benchmarks (ibm02 cong 2.4→7.6)
-        # More SA time (60s) compensates for fewer gradient steps.
         TOTAL_STEPS    = 300
         ALPHA_START    = 10.0
         ALPHA_END      = 30.0
-        DEN_W_PHASE1   = 2.0    # strong cell density penalty
-        DEN_W_PHASE2   = 0.5    # keep at 0.5: needed to resist L-route compression → fewer overlaps → faster legalization
-        OVL_W_PHASE1   = 20.0   # direct macro-pair overlap penalty
-        OVL_W_PHASE2   = 20.0   # NEVER reduce — prevents legalization regression
+        DEN_W_PHASE1   = 2.0
+        DEN_W_PHASE2   = 0.5
+        OVL_W_PHASE1   = 20.0
+        OVL_W_PHASE2   = 20.0   # never reduce — causes legalization regression
         CONG_W_PHASE1  = 0.0    # no congestion until overlaps resolve
-        CONG_W_PHASE2  = 0.3    # L-route surrogate; overridden adaptively at step PHASE2_START-1
+        CONG_W_PHASE2  = 0.3    # overridden adaptively at step PHASE2_START-1
         PHASE2_START   = 100
         TARGET_DEN     = 1.0
         LR             = 0.05
@@ -1292,26 +1081,15 @@ class AnalyticalPlacer:
         print("[analytical_placer] Legalizing hard macros...")
         final_pos = _legalize(analytical_pos, b, time_budget_s=120.0)
 
-        # Phase 4: post-legalization gradient refinement.
-        # OVL_W was raised from 5→20 in _post_legalize_refine() to prevent the
-        # density spike (ibm01: 0.576→0.934) caused by cong gradient recreating
-        # small overlaps when OVL_W=5. With OVL_W=20 macros stay non-overlapping.
-        # Post-legalization gradient refinement: run only for low-congestion benchmarks.
-        # High-cong benchmarks (cong_100 >= 2.0) regress because the congestion gradient
-        # disrupts the already well-optimized placement (ibm02: proxy 1.33→1.69 with refine).
-        # Low-cong benchmarks benefit: ibm01 proxy 0.9524→0.9249.
         if measured_cong_100 < 2.0:
             print(f"[analytical_placer] Post-legalization gradient refinement (40 steps, cong_100={measured_cong_100:.2f})...")
             final_pos = _post_legalize_refine(final_pos, b, data, device, steps=40, cong_w=0.5)
 
-        # Phase 5: SA refinement — multiple restarts for high-congestion benchmarks.
-        # ibm02/ibm06/ibm15/ibm18 have cong_100 > 2.3 and score above 1.4; a single
-        # SA run can get stuck. 3 × 30s = 90s extra per benchmark, worth the trade.
         n_sa_trials = 3 if measured_cong_100 > 2.3 else 1
         if n_sa_trials > 1:
-            print(f"[analytical_placer] SA refinement ({n_sa_trials} restarts × 30s, cong_100={measured_cong_100:.2f})...")
+            print(f"[analytical_placer] SA refinement ({n_sa_trials} restarts × 60s, cong_100={measured_cong_100:.2f})...")
         else:
-            print("[analytical_placer] SA refinement (fast WL, 30s budget)...")
+            print("[analytical_placer] SA refinement (fast WL, 60s budget)...")
 
         # Fast L1 WL cost for comparing SA trial results
         _powner  = data["pin_owner"].cpu()
