@@ -23,27 +23,6 @@ import torch.nn.functional as F
 from macro_place.benchmark import Benchmark
 
 # ---------------------------------------------------------------------------
-# Optional CUDA extension for fast L-route demand computation
-# ---------------------------------------------------------------------------
-# Build once on the eval server:
-#   cd submissions/analytical_placer/lroute_ext && pip install -e .
-# When loaded, forward+backward run in O(E×avg_span) instead of O(E×C/R).
-# For ibm17 (E≈130k, avg_span≈7 vs C=51) this is ~7x faster per step,
-# enabling TOTAL_STEPS=1000 instead of 300 in the same wall-clock budget.
-import os as _os, sys as _sys
-_lroute_ext_dir = _os.path.join(_os.path.dirname(__file__), 'lroute_ext')
-if _lroute_ext_dir not in _sys.path:
-    _sys.path.insert(0, _lroute_ext_dir)
-try:
-    import lroute_cuda_ext as _LROUTE_CUDA_EXT
-    print("[analytical_placer] CUDA L-route extension loaded")
-except ImportError:
-    _LROUTE_CUDA_EXT = None
-# Disabled: lroute CUDA backward produces wrong congestion gradients on GPU
-# (congestion increases 1.21→1.71 vs decreasing 1.21→0.78 with PyTorch scatter path)
-_LROUTE_CUDA_EXT = None
-
-# ---------------------------------------------------------------------------
 # Optional CUDA extension for fast density computation
 # ---------------------------------------------------------------------------
 # Build once on the eval server:
@@ -453,45 +432,6 @@ def rudy_congestion_loss(
 # L-route differentiable congestion surrogate (matches plc_client_os.py semantics)
 # ---------------------------------------------------------------------------
 
-class _LRouteDemand(torch.autograd.Function):
-    """
-    Custom autograd Function wrapping the CUDA L-route extension.
-
-    forward:  calls lroute_cuda_ext.forward  — O(E × avg_span) atomicAdd kernels
-    backward: calls lroute_cuda_ext.backward — O(E × avg_span) gradient kernels
-
-    Gradient derivation (H demand, symmetric for V):
-      H_demand[row_lo,c] += w * (1-frac_y) * ov_c
-      H_demand[row_hi,c] += w * frac_y     * ov_c
-      where frac_y = frac(sy/ch), ov_c = col overlap fraction
-
-      d/d(sy):    g_sy = (w/ch) * sum_c ov_c * (gH[row_hi,c] - gH[row_lo,c])
-      d/d(x_min): -1/cw at leftmost column (when x_min is inside that column)
-      d/d(x_max): +1/cw at rightmost column (when x_max is inside that column)
-    """
-    @staticmethod
-    def forward(ctx, src_x, src_y, snk_x, snk_y, edge_wt, R, C, cw, ch):
-        H, V = _LROUTE_CUDA_EXT.forward(
-            src_x.contiguous(), src_y.contiguous(),
-            snk_x.contiguous(), snk_y.contiguous(),
-            edge_wt.contiguous(), R, C, float(cw), float(ch)
-        )
-        ctx.save_for_backward(src_x, src_y, snk_x, snk_y, edge_wt)
-        ctx.R, ctx.C, ctx.cw, ctx.ch = R, C, cw, ch
-        return H, V
-
-    @staticmethod
-    def backward(ctx, grad_H, grad_V):
-        src_x, src_y, snk_x, snk_y, edge_wt = ctx.saved_tensors
-        R, C, cw, ch = ctx.R, ctx.C, ctx.cw, ctx.ch
-        g_sx, g_sy, g_kx, g_ky = _LROUTE_CUDA_EXT.backward(
-            src_x, src_y, snk_x, snk_y, edge_wt,
-            grad_H.contiguous(), grad_V.contiguous(),
-            R, C, float(cw), float(ch)
-        )
-        return g_sx, g_sy, g_kx, g_ky, None, None, None, None, None
-
-
 def lroute_congestion_loss(
     pin_xy: torch.Tensor,    # [total_pins, 2] — differentiable pin world coords
     data: dict,              # from _preprocess(), includes edge_src/snk/weights
@@ -540,65 +480,53 @@ def lroute_congestion_loss(
     snk_y = snk_xy[:, 1]   # [E]
 
     # ------------------------------------------------------------------
-    # Compute H_demand [R, C] and V_demand [R, C]
-    #
-    # Two paths:
-    #   CUDA ext (when available on GPU): O(E × avg_span) atomicAdd kernels
-    #     — avoids the [E, C] and [E, R] intermediate matrices
-    #     — ~7× faster for ibm17 (E≈130k, avg_span≈7 vs C=51)
-    #     — enables TOTAL_STEPS=1000 in the same wall-clock budget
-    #   PyTorch fallback (CPU or ext not built): existing scatter_add approach
+    # Compute H_demand [R, C] and V_demand [R, C] via scatter_add
     # ------------------------------------------------------------------
-    if _LROUTE_CUDA_EXT is not None and device.type == 'cuda':
-        H_demand, V_demand = _LRouteDemand.apply(
-            src_x, src_y, snk_x, snk_y, edge_wt, rows, cols, cw, ch
-        )
-    else:
-        x_min = torch.minimum(src_x, snk_x)
-        x_max = torch.maximum(src_x, snk_x)
-        y_min = torch.minimum(src_y, snk_y)
-        y_max = torch.maximum(src_y, snk_y)
+    x_min = torch.minimum(src_x, snk_x)
+    x_max = torch.maximum(src_x, snk_x)
+    y_min = torch.minimum(src_y, snk_y)
+    y_max = torch.maximum(src_y, snk_y)
 
-        row_float = (src_y / ch).clamp(0.0, float(rows))
-        row_lo = row_float.detach().long().clamp(0, rows - 1)
-        row_hi = (row_lo + 1).clamp(0, rows - 1)
-        row_w_hi = (row_float - row_lo.float()).clamp(0.0, 1.0)
-        row_w_lo = 1.0 - row_w_hi
+    row_float = (src_y / ch).clamp(0.0, float(rows))
+    row_lo = row_float.detach().long().clamp(0, rows - 1)
+    row_hi = (row_lo + 1).clamp(0, rows - 1)
+    row_w_hi = (row_float - row_lo.float()).clamp(0.0, 1.0)
+    row_w_lo = 1.0 - row_w_hi
 
-        col_left  = (torch.arange(cols, device=device, dtype=torch.float32) * cw).unsqueeze(0)
-        col_right = col_left + cw
-        H_col_ov = F.relu(
-            torch.minimum(x_max.unsqueeze(1), col_right) -
-            torch.maximum(x_min.unsqueeze(1), col_left)
-        ) / cw
-        H_lo = edge_wt.unsqueeze(1) * row_w_lo.unsqueeze(1) * H_col_ov
-        H_hi = edge_wt.unsqueeze(1) * row_w_hi.unsqueeze(1) * H_col_ov
-        idx_lo = row_lo.unsqueeze(1).expand(-1, cols)
-        idx_hi = row_hi.unsqueeze(1).expand(-1, cols)
-        H_demand = torch.zeros(rows, cols, device=device, dtype=pin_xy.dtype)
-        H_demand = H_demand.scatter_add(0, idx_lo, H_lo)
-        H_demand = H_demand.scatter_add(0, idx_hi, H_hi)
+    col_left  = (torch.arange(cols, device=device, dtype=torch.float32) * cw).unsqueeze(0)
+    col_right = col_left + cw
+    H_col_ov = F.relu(
+        torch.minimum(x_max.unsqueeze(1), col_right) -
+        torch.maximum(x_min.unsqueeze(1), col_left)
+    ) / cw
+    H_lo = edge_wt.unsqueeze(1) * row_w_lo.unsqueeze(1) * H_col_ov
+    H_hi = edge_wt.unsqueeze(1) * row_w_hi.unsqueeze(1) * H_col_ov
+    idx_lo = row_lo.unsqueeze(1).expand(-1, cols)
+    idx_hi = row_hi.unsqueeze(1).expand(-1, cols)
+    H_demand = torch.zeros(rows, cols, device=device, dtype=pin_xy.dtype)
+    H_demand = H_demand.scatter_add(0, idx_lo, H_lo)
+    H_demand = H_demand.scatter_add(0, idx_hi, H_hi)
 
-        col_float = (snk_x / cw).clamp(0.0, float(cols))
-        col_lo = col_float.detach().long().clamp(0, cols - 1)
-        col_hi = (col_lo + 1).clamp(0, cols - 1)
-        col_w_hi = (col_float - col_lo.float()).clamp(0.0, 1.0)
-        col_w_lo = 1.0 - col_w_hi
-        row_bot = (torch.arange(rows, device=device, dtype=torch.float32) * ch).unsqueeze(0)
-        row_top = row_bot + ch
-        V_row_ov = F.relu(
-            torch.minimum(y_max.unsqueeze(1), row_top) -
-            torch.maximum(y_min.unsqueeze(1), row_bot)
-        ) / ch
-        V_lo = edge_wt.unsqueeze(1) * col_w_lo.unsqueeze(1) * V_row_ov
-        V_hi = edge_wt.unsqueeze(1) * col_w_hi.unsqueeze(1) * V_row_ov
-        V_lo_t = V_lo.t()
-        V_hi_t = V_hi.t()
-        c_lo_exp = col_lo.unsqueeze(0).expand(rows, -1)
-        c_hi_exp = col_hi.unsqueeze(0).expand(rows, -1)
-        V_demand = torch.zeros(rows, cols, device=device, dtype=pin_xy.dtype)
-        V_demand = V_demand.scatter_add(1, c_lo_exp, V_lo_t)
-        V_demand = V_demand.scatter_add(1, c_hi_exp, V_hi_t)
+    col_float = (snk_x / cw).clamp(0.0, float(cols))
+    col_lo = col_float.detach().long().clamp(0, cols - 1)
+    col_hi = (col_lo + 1).clamp(0, cols - 1)
+    col_w_hi = (col_float - col_lo.float()).clamp(0.0, 1.0)
+    col_w_lo = 1.0 - col_w_hi
+    row_bot = (torch.arange(rows, device=device, dtype=torch.float32) * ch).unsqueeze(0)
+    row_top = row_bot + ch
+    V_row_ov = F.relu(
+        torch.minimum(y_max.unsqueeze(1), row_top) -
+        torch.maximum(y_min.unsqueeze(1), row_bot)
+    ) / ch
+    V_lo = edge_wt.unsqueeze(1) * col_w_lo.unsqueeze(1) * V_row_ov
+    V_hi = edge_wt.unsqueeze(1) * col_w_hi.unsqueeze(1) * V_row_ov
+    V_lo_t = V_lo.t()
+    V_hi_t = V_hi.t()
+    c_lo_exp = col_lo.unsqueeze(0).expand(rows, -1)
+    c_hi_exp = col_hi.unsqueeze(0).expand(rows, -1)
+    V_demand = torch.zeros(rows, cols, device=device, dtype=pin_xy.dtype)
+    V_demand = V_demand.scatter_add(1, c_lo_exp, V_lo_t)
+    V_demand = V_demand.scatter_add(1, c_hi_exp, V_hi_t)
 
     # ------------------------------------------------------------------
     # Normalize by routing supply
@@ -1208,7 +1136,7 @@ class AnalyticalPlacer:
         DEN_W_PHASE1   = 2.0    # strong cell density penalty
         DEN_W_PHASE2   = 0.5    # keep at 0.5: needed to resist L-route compression → fewer overlaps → faster legalization
         OVL_W_PHASE1   = 20.0   # direct macro-pair overlap penalty
-        OVL_W_PHASE2   = 50.0   # stronger than phase1: fewer overlaps entering legalization
+        OVL_W_PHASE2   = 20.0   # NEVER reduce — prevents legalization regression
         CONG_W_PHASE1  = 0.0    # no congestion until overlaps resolve
         CONG_W_PHASE2  = 0.3    # L-route surrogate; overridden adaptively at step PHASE2_START-1
         PHASE2_START   = 100
@@ -1298,27 +1226,6 @@ class AnalyticalPlacer:
         final_gpu = pos_full.clone()
         final_gpu[movable_idx] = best_movable
         analytical_pos = final_gpu.cpu()
-
-        # PAINPOINT 3 diagnostic: count overlapping hard macro pairs entering legalization.
-        # High counts (>50) explain why pairwise separation needs 100+ passes.
-        # Target: <20 pairs with OVL_W=50 in phase2.
-        with torch.no_grad():
-            num_hard = b.num_hard_macros
-            p_diag = final_gpu[:num_hard]
-            sz_diag = sizes[:num_hard]
-            gap = 0.02
-            x_d = p_diag[:, 0]; y_d = p_diag[:, 1]
-            hw_d = sz_diag[:, 0] / 2 + gap / 2
-            hh_d = sz_diag[:, 1] / 2 + gap / 2
-            dx_d = (x_d.unsqueeze(0) - x_d.unsqueeze(1)).abs()
-            dy_d = (y_d.unsqueeze(0) - y_d.unsqueeze(1)).abs()
-            px_d = F.relu(hw_d.unsqueeze(0) + hw_d.unsqueeze(1) - dx_d)
-            py_d = F.relu(hh_d.unsqueeze(0) + hh_d.unsqueeze(1) - dy_d)
-            mask_triu = torch.triu(torch.ones(num_hard, num_hard, device=device, dtype=torch.bool), diagonal=1)
-            n_ovl_pairs = int(((px_d > 0) & (py_d > 0))[mask_triu].sum().item())
-            total_pairs = num_hard * (num_hard - 1) // 2
-            print(f"  [pre-legalize] overlapping hard macro pairs: {n_ovl_pairs} / {total_pairs} "
-                  f"({100.0*n_ovl_pairs/max(1,total_pairs):.1f}%)")
 
         # Phase 3: legalize hard macros (120s cap — most benchmarks converge well
         # within this; only ibm10's ~1100s extreme case gets truncated)
