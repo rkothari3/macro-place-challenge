@@ -611,10 +611,15 @@ def lroute_congestion_loss(
         x_frac = x_ol / cw                    # [H, cols]
         y_frac = y_ol / ch                    # [H, rows]
 
-        # V_macro[r,c] = sum_i y_ind[i,r] × x_frac[i,c] × V_ALLOC_FRAC
-        V_macro = y_ind.t() @ x_frac * _MACRO_V_ALLOC_FRAC   # [rows, cols]
-        # H_macro[r,c] = sum_i x_ind[i,c] × y_frac[i,r] × H_ALLOC_FRAC
-        H_macro = y_frac.t() @ x_ind * _MACRO_H_ALLOC_FRAC   # [rows, cols]
+        # Detach macro blockage from autograd: blockage improves surrogate calibration
+        # (cong_100 at step 99) but its gradient pushes macros to reduce their own
+        # cell footprint — this disrupts routing topology. Only net routing gradient
+        # should guide macro positions.
+        with torch.no_grad():
+            # V_macro[r,c] = sum_i y_ind[i,r] × x_frac[i,c] × V_ALLOC_FRAC
+            V_macro = y_ind.t() @ x_frac * _MACRO_V_ALLOC_FRAC   # [rows, cols]
+            # H_macro[r,c] = sum_i x_ind[i,c] × y_frac[i,r] × H_ALLOC_FRAC
+            H_macro = y_frac.t() @ x_ind * _MACRO_H_ALLOC_FRAC   # [rows, cols]
 
         H_cong = H_cong + H_macro
         V_cong = V_cong + V_macro
@@ -1260,9 +1265,10 @@ class AnalyticalPlacer:
                     p_meas[:, 1] = p_meas[:, 1].clamp(half_h, ch - half_h)
                     pxy_meas = _compute_pin_xy(p_meas, data, b, port_pos)
                     cong_100 = lroute_congestion_loss(pxy_meas, data, b, device, pos=p_meas, sizes=sizes).item()
-                # Scale CONG_W from 0.10 (low cong) to 0.45 (high cong).
-                # Now includes macro blockage so cong_100 values are higher than before.
-                CONG_W_PHASE2 = min(0.45, max(0.10, 0.10 + 0.30 * (cong_100 - 1.5) / 0.9))
+                # Scale CONG_W from 0.10 (low cong) to 0.30 (high cong).
+                # cong_100 now includes macro blockage so values are ~0.1-0.2 higher.
+                # Keep cap at 0.30 — experiments show CONG_W>0.30 degrades ibm02/06.
+                CONG_W_PHASE2 = min(0.30, max(0.10, 0.10 + 0.20 * (cong_100 - 1.2) / 0.6))
                 measured_cong_100 = cong_100
                 print(f"  [adaptive] cong_100={cong_100:.4f} → CONG_W_PHASE2={CONG_W_PHASE2:.3f}")
 
@@ -1290,8 +1296,13 @@ class AnalyticalPlacer:
         # OVL_W was raised from 5→20 in _post_legalize_refine() to prevent the
         # density spike (ibm01: 0.576→0.934) caused by cong gradient recreating
         # small overlaps when OVL_W=5. With OVL_W=20 macros stay non-overlapping.
-        print("[analytical_placer] Post-legalization gradient refinement (40 steps)...")
-        final_pos = _post_legalize_refine(final_pos, b, data, device, steps=40, cong_w=0.5)
+        # Post-legalization gradient refinement: run only for low-congestion benchmarks.
+        # High-cong benchmarks (cong_100 >= 2.0) regress because the congestion gradient
+        # disrupts the already well-optimized placement (ibm02: proxy 1.33→1.69 with refine).
+        # Low-cong benchmarks benefit: ibm01 proxy 0.9524→0.9249.
+        if measured_cong_100 < 2.0:
+            print(f"[analytical_placer] Post-legalization gradient refinement (40 steps, cong_100={measured_cong_100:.2f})...")
+            final_pos = _post_legalize_refine(final_pos, b, data, device, steps=40, cong_w=0.5)
 
         # Phase 5: SA refinement — multiple restarts for high-congestion benchmarks.
         # ibm02/ibm06/ibm15/ibm18 have cong_100 > 2.3 and score above 1.4; a single
