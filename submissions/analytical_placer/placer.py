@@ -15,12 +15,20 @@ Congestion surrogate: L-route (not RUDY).
 from __future__ import annotations
 
 import math
+import os as _os
 import random
+import sys as _sys
 import time
 import torch
 import torch.nn.functional as F
 
 from macro_place.benchmark import Benchmark
+
+# IBM ICCAD04 macro routing allocation fractions (routes_used_by_macros / routes_per_micron).
+# All 17 IBM benchmarks share: hor=30.304/65.957≈0.459, ver=71.304/106.957≈0.667.
+# These fractions represent how much routing capacity macros block in cells they occupy.
+_MACRO_H_ALLOC_FRAC = 0.459
+_MACRO_V_ALLOC_FRAC = 0.667
 
 # ---------------------------------------------------------------------------
 # Optional CUDA extension for fast density computation
@@ -438,6 +446,8 @@ def lroute_congestion_loss(
     b: Benchmark,
     device: torch.device,
     smooth_range: int = 2,   # IBM benchmarks use smooth_range=2
+    pos: torch.Tensor | None = None,    # [num_macros, 2] — for macro blockage term
+    sizes: torch.Tensor | None = None,  # [num_macros, 2] — for macro blockage term
 ) -> torch.Tensor:
     """
     Differentiable L-route congestion surrogate matching plc_client_os.py semantics.
@@ -566,6 +576,48 @@ def lroute_congestion_loss(
         kv = torch.ones(1, 1, k, 1, device=device, dtype=H_cong.dtype) / k
         hc4d = F.pad(H_cong[None, None], (0, 0, smooth_range, smooth_range), mode='replicate')
         H_cong = F.conv2d(hc4d, kv).squeeze(0).squeeze(0)   # [R, C]
+
+    # ------------------------------------------------------------------
+    # Add macro routing blockage (competition adds this AFTER smoothing net routing).
+    #
+    # When a hard macro occupies a grid cell, it blocks routing tracks:
+    #   V_macro[r,c] = sum_i [macro_i in cell] × (x_overlap_i(c)/cw) × V_ALLOC_FRAC
+    #   H_macro[r,c] = sum_i [macro_i in cell] × (y_overlap_i(r)/ch) × H_ALLOC_FRAC
+    #
+    # IBM alloc fractions: V=0.667 (macros block 67% of vertical tracks),
+    #                      H=0.459 (macros block 46% of horizontal tracks).
+    # This explains why actual evaluation congestion > our net-only surrogate.
+    # ------------------------------------------------------------------
+    if pos is not None and sizes is not None and b.num_hard_macros > 0:
+        num_h = b.num_hard_macros
+        cx = pos[:num_h, 0].unsqueeze(1)  # [H, 1]
+        cy = pos[:num_h, 1].unsqueeze(1)
+        hw = sizes[:num_h, 0].unsqueeze(1) / 2
+        hh = sizes[:num_h, 1].unsqueeze(1) / 2
+
+        col_l = torch.arange(cols, device=device, dtype=pos.dtype) * cw
+        col_r = col_l + cw
+        row_b = torch.arange(rows, device=device, dtype=pos.dtype) * ch
+        row_t = row_b + ch
+
+        # [H, cols]: horizontal overlap in microns
+        x_ol = F.relu(torch.minimum(cx + hw, col_r) - torch.maximum(cx - hw, col_l))
+        # [H, rows]: vertical overlap in microns
+        y_ol = F.relu(torch.minimum(cy + hh, row_t) - torch.maximum(cy - hh, row_b))
+
+        # Soft row-presence indicator: clamp fraction to [0, 1]
+        y_ind = (y_ol / ch).clamp(max=1.0)   # [H, rows]
+        x_ind = (x_ol / cw).clamp(max=1.0)   # [H, cols]
+        x_frac = x_ol / cw                    # [H, cols]
+        y_frac = y_ol / ch                    # [H, rows]
+
+        # V_macro[r,c] = sum_i y_ind[i,r] × x_frac[i,c] × V_ALLOC_FRAC
+        V_macro = y_ind.t() @ x_frac * _MACRO_V_ALLOC_FRAC   # [rows, cols]
+        # H_macro[r,c] = sum_i x_ind[i,c] × y_frac[i,r] × H_ALLOC_FRAC
+        H_macro = y_frac.t() @ x_ind * _MACRO_H_ALLOC_FRAC   # [rows, cols]
+
+        H_cong = H_cong + H_macro
+        V_cong = V_cong + V_macro
 
     # ------------------------------------------------------------------
     # Top-5% mean of concatenated H+V grids (matches abu(H+V, 0.05))
@@ -766,10 +818,10 @@ def _post_legalize_refine(
 
         pin_xy = _compute_pin_xy(p, data, b, port_pos)
         wl   = lse_hpwl_loss(pin_xy, data, b, alpha=50.0)
-        cong = lroute_congestion_loss(pin_xy, data, b, device)
+        cong = lroute_congestion_loss(pin_xy, data, b, device, pos=p, sizes=sizes)
         den  = density_loss(p, sizes, cell_centers, cell_size, b, target_density=1.0)
         ovl  = macro_overlap_loss(p, sizes, num_hard)
-        loss = wl + cong_w * cong + 0.3 * den + 5.0 * ovl
+        loss = wl + cong_w * cong + 0.4 * den + 20.0 * ovl
         loss.backward()
 
         optimizer.step()
@@ -1181,7 +1233,7 @@ class AnalyticalPlacer:
             ovl = macro_overlap_loss(pos, sizes, b.num_hard_macros)
 
             if cong_w > 0:
-                cong = lroute_congestion_loss(pin_xy, data, b, device)
+                cong = lroute_congestion_loss(pin_xy, data, b, device, pos=pos, sizes=sizes)
             else:
                 cong = torch.zeros(1, device=device).squeeze()
 
@@ -1207,8 +1259,10 @@ class AnalyticalPlacer:
                     p_meas[:, 0] = p_meas[:, 0].clamp(half_w, cw - half_w)
                     p_meas[:, 1] = p_meas[:, 1].clamp(half_h, ch - half_h)
                     pxy_meas = _compute_pin_xy(p_meas, data, b, port_pos)
-                    cong_100 = lroute_congestion_loss(pxy_meas, data, b, device).item()
-                CONG_W_PHASE2 = min(0.30, max(0.10, 0.10 + 0.20 * (cong_100 - 1.2) / 0.6))
+                    cong_100 = lroute_congestion_loss(pxy_meas, data, b, device, pos=p_meas, sizes=sizes).item()
+                # Scale CONG_W from 0.10 (low cong) to 0.45 (high cong).
+                # Now includes macro blockage so cong_100 values are higher than before.
+                CONG_W_PHASE2 = min(0.45, max(0.10, 0.10 + 0.30 * (cong_100 - 1.5) / 0.9))
                 measured_cong_100 = cong_100
                 print(f"  [adaptive] cong_100={cong_100:.4f} → CONG_W_PHASE2={CONG_W_PHASE2:.3f}")
 
@@ -1232,11 +1286,12 @@ class AnalyticalPlacer:
         print("[analytical_placer] Legalizing hard macros...")
         final_pos = _legalize(analytical_pos, b, time_budget_s=120.0)
 
-        # Phase 4: post-legalization gradient refinement — DISABLED
-        # cong gradient (cong_w=0.5) caused density to spike (ibm01: 0.576→0.934)
-        # by clustering macros after legalization had spread them cleanly.
-        # print("[analytical_placer] Post-legalization gradient refinement (50 steps)...")
-        # final_pos = _post_legalize_refine(final_pos, b, data, device, steps=50, cong_w=0.5)
+        # Phase 4: post-legalization gradient refinement.
+        # OVL_W was raised from 5→20 in _post_legalize_refine() to prevent the
+        # density spike (ibm01: 0.576→0.934) caused by cong gradient recreating
+        # small overlaps when OVL_W=5. With OVL_W=20 macros stay non-overlapping.
+        print("[analytical_placer] Post-legalization gradient refinement (40 steps)...")
+        final_pos = _post_legalize_refine(final_pos, b, data, device, steps=40, cong_w=0.5)
 
         # Phase 5: SA refinement — multiple restarts for high-congestion benchmarks.
         # ibm02/ibm06/ibm15/ibm18 have cong_100 > 2.3 and score above 1.4; a single
@@ -1268,7 +1323,7 @@ class AnalyticalPlacer:
             torch.manual_seed(trial * 37)
             trial_pos = _sa_refinement(
                 final_pos, b, data, device,
-                max_iters=3000, time_budget_s=60.0
+                max_iters=15000, time_budget_s=60.0
             )
 
             trial_cost = _eval_wl(trial_pos)
