@@ -1081,46 +1081,20 @@ class AnalyticalPlacer:
         print("[analytical_placer] Legalizing hard macros...")
         final_pos = _legalize(analytical_pos, b, time_budget_s=120.0)
 
-        if measured_cong_100 < 2.0:
-            print(f"[analytical_placer] Post-legalization gradient refinement (40 steps, cong_100={measured_cong_100:.2f})...")
-            final_pos = _post_legalize_refine(final_pos, b, data, device, steps=40, cong_w=0.5)
+        # Post-legalization gradient refinement: two rounds.
+        # Round 1 (40 steps, light): recovers from legalization displacement.
+        # Round 2 (60 steps, cong-focused): heavier cong penalty for high-cong
+        #   benchmarks, or additional WL+density polish for low-cong ones.
+        # Replaces SA which never found WL improvements (all accepted moves were
+        # uphill, so best_pos always equaled the initial post-legalize position).
+        cong_w_r1 = 0.5
+        cong_w_r2 = min(0.8, 0.4 + 0.4 * (measured_cong_100 - 1.2) / 0.6) if measured_cong_100 > 1.2 else 0.4
+        cong_w_r2 = max(0.4, cong_w_r2)
 
-        n_sa_trials = 3 if measured_cong_100 > 2.3 else 1
-        if n_sa_trials > 1:
-            print(f"[analytical_placer] SA refinement ({n_sa_trials} restarts × 60s, cong_100={measured_cong_100:.2f})...")
-        else:
-            print("[analytical_placer] SA refinement (fast WL, 60s budget)...")
+        print(f"[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w={cong_w_r1:.2f})...")
+        final_pos = _post_legalize_refine(final_pos, b, data, device, steps=40, cong_w=cong_w_r1)
 
-        # Fast L1 WL cost for comparing SA trial results
-        _powner  = data["pin_owner"].cpu()
-        _esrc    = data["edge_src_idx"].cpu()
-        _esnk    = data["edge_snk_idx"].cpu()
-        _ewt     = data["edge_weights"].cpu()
-        _portpos = b.port_positions  # [P, 2] CPU
-
-        def _eval_wl(pos_cpu: torch.Tensor) -> float:
-            p_ext = torch.cat([pos_cpu, _portpos], dim=0) if _portpos.shape[0] > 0 else pos_cpu
-            mi = p_ext.shape[0] - 1
-            s = p_ext[_powner[_esrc].clamp(0, mi)]
-            k = p_ext[_powner[_esnk].clamp(0, mi)]
-            return (_ewt * (s - k).abs().sum(1)).sum().item()
-
-        best_sa_pos  = None
-        best_sa_cost = float('inf')
-        for trial in range(n_sa_trials):
-            random.seed(trial * 37)
-            torch.manual_seed(trial * 37)
-            trial_pos = _sa_refinement(
-                final_pos, b, data, device,
-                max_iters=15000, time_budget_s=60.0
-            )
-
-            trial_cost = _eval_wl(trial_pos)
-            if n_sa_trials > 1:
-                print(f"  [SA trial {trial+1}/{n_sa_trials}] wl_cost={trial_cost:.1f}")
-            if trial_cost < best_sa_cost:
-                best_sa_cost = trial_cost
-                best_sa_pos = trial_pos
-        final_pos = best_sa_pos
+        print(f"[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w={cong_w_r2:.2f}, cong_100={measured_cong_100:.2f})...")
+        final_pos = _post_legalize_refine(final_pos, b, data, device, steps=60, cong_w=cong_w_r2)
 
         return final_pos
