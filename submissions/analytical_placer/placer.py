@@ -962,54 +962,140 @@ class AnalyticalPlacer:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"[analytical_placer] device={device}")
 
-        # Preprocess into GPU tensors (runs once)
         print("[analytical_placer] Preprocessing benchmark tensors...")
         data = _preprocess(b, device)
         port_pos = b.port_positions.to(device)
         cell_centers, cell_size = _make_cell_centers(b, device)
         sizes = b.macro_sizes.to(device)
         movable = b.get_movable_mask().to(device)
+        movable_idx = movable.nonzero(as_tuple=True)[0]
 
-        movable_idx = movable.nonzero(as_tuple=True)[0]  # [num_movable]
+        pos_full = b.macro_positions.clone().to(device)
 
-        # Init from current benchmark positions
-        pos_full    = b.macro_positions.clone().to(device)
-        pos_movable = pos_full[movable_idx].detach().requires_grad_(True)
-
-        TOTAL_STEPS    = 300
-        ALPHA_START    = 10.0
-        ALPHA_END      = 30.0
-        DEN_W_PHASE1   = 2.0
-        DEN_W_PHASE2   = 0.5
-        OVL_W_PHASE1   = 20.0
-        OVL_W_PHASE2   = 20.0   # never reduce — causes legalization regression
-        CONG_W_PHASE1  = 0.0    # no congestion until overlaps resolve
-        CONG_W_PHASE2  = 0.3    # overridden adaptively at step PHASE2_START-1
-        PHASE2_START   = 100
-        TARGET_DEN     = 1.0
-        LR             = 0.05
-        GRAD_CLIP      = 5.0
-
-        optimizer = torch.optim.Adam([pos_movable], lr=LR)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=TOTAL_STEPS, eta_min=0.005
-        )
-
-        best_loss    = float("inf")
-        best_movable = pos_movable.detach().clone()
-        measured_cong_100 = 0.0   # filled at step PHASE2_START-1, used for SA restart decision
+        TOTAL_STEPS  = 300
+        ALPHA_START  = 10.0
+        ALPHA_END    = 30.0
+        DEN_W_PHASE1 = 2.0
+        DEN_W_PHASE2 = 0.5
+        OVL_W        = 20.0   # never reduce — causes legalization regression
+        PHASE2_START = 100
+        TARGET_DEN   = 1.0
+        LR           = 0.05
+        GRAD_CLIP    = 5.0
+        NUM_RESTARTS = 2      # original init + 1 perturbed restart
 
         cw, ch = b.canvas_width, b.canvas_height
         half_w = sizes[:, 0] / 2
         half_h = sizes[:, 1] / 2
 
-        print(f"[analytical_placer] Gradient descent ({TOTAL_STEPS} steps)...")
-        for step in range(TOTAL_STEPS):
+        # ------------------------------------------------------------------
+        # Multi-start phase 1: run NUM_RESTARTS starts for PHASE2_START steps,
+        # pick the one with lowest cong_100 at step 99, continue only that one.
+        #
+        # We preserve the WINNING restart's Adam optimizer (with its moment
+        # estimates) so phase 2 continues from a warm-started Adam, not a
+        # fresh one. This avoids the tiny-step issue from zero moments.
+        # ------------------------------------------------------------------
+        best_cong_at_99   = float("inf")
+        best_pos_movable  = None   # winning restart's parameter tensor
+        best_optimizer    = None   # winning restart's Adam (warm state)
+        best_scheduler    = None   # winning restart's LR scheduler
+        measured_cong_100 = 0.0
+        CONG_W_PHASE2     = 0.10
+
+        PERTURB_SIGMA = max(cw, ch) / 10.0
+
+        for restart_idx in range(NUM_RESTARTS):
+            if restart_idx == 0:
+                pm_init = pos_full[movable_idx].detach().clone()
+            else:
+                g = torch.Generator(device=device)
+                g.manual_seed(restart_idx * 17)
+                noise = torch.randn(pm_init.shape, generator=g, device=device) * PERTURB_SIGMA
+                pm_init = (pos_full[movable_idx].detach() + noise)
+                pm_init[:, 0].clamp_(half_w[movable_idx], cw - half_w[movable_idx])
+                pm_init[:, 1].clamp_(half_h[movable_idx], ch - half_h[movable_idx])
+
+            pos_movable = pm_init.clone().requires_grad_(True)
+            optimizer = torch.optim.Adam([pos_movable], lr=LR)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=TOTAL_STEPS, eta_min=0.005
+            )
+
+            print(f"[analytical_placer] Restart {restart_idx}: Phase 1 ({PHASE2_START} steps)...")
+            for step in range(PHASE2_START):
+                optimizer.zero_grad()
+
+                pos = pos_full.clone()
+                pos[movable_idx] = pos_movable
+                pos_x = pos[:, 0].clamp(half_w, cw - half_w)
+                pos_y = pos[:, 1].clamp(half_h, ch - half_h)
+                pos   = torch.stack([pos_x, pos_y], dim=1)
+
+                frac  = step / TOTAL_STEPS
+                alpha = ALPHA_START + (ALPHA_END - ALPHA_START) * frac
+
+                pin_xy = _compute_pin_xy(pos, data, b, port_pos)
+                wl  = lse_hpwl_loss(pin_xy, data, b, alpha)
+                den = density_loss(pos, sizes, cell_centers, cell_size, b, target_density=TARGET_DEN)
+                ovl = macro_overlap_loss(pos, sizes, b.num_hard_macros)
+                loss = wl + DEN_W_PHASE1 * den + OVL_W * ovl  # no cong in phase 1
+                loss.backward()
+
+                torch.nn.utils.clip_grad_norm_([pos_movable], GRAD_CLIP)
+                optimizer.step()
+                scheduler.step()
+
+                with torch.no_grad():
+                    pos_movable[:, 0].clamp_(half_w[movable_idx], cw - half_w[movable_idx])
+                    pos_movable[:, 1].clamp_(half_h[movable_idx], ch - half_h[movable_idx])
+
+                if step % 50 == 0:
+                    print(f"  [r{restart_idx}] step {step:3d}  loss={loss.item():.4f}  "
+                          f"wl={wl.item():.4f}  den={den.item():.6f}  alpha={alpha:.1f}")
+
+            # Measure cong_100 at step 99 using the current (end-of-phase-1) positions
+            with torch.no_grad():
+                p_meas = pos_full.clone()
+                p_meas[movable_idx] = pos_movable.detach()
+                p_meas[:, 0] = p_meas[:, 0].clamp(half_w, cw - half_w)
+                p_meas[:, 1] = p_meas[:, 1].clamp(half_h, ch - half_h)
+                pxy_meas = _compute_pin_xy(p_meas, data, b, port_pos)
+                cong_100 = lroute_congestion_loss(
+                    pxy_meas, data, b, device, pos=p_meas, sizes=sizes
+                ).item()
+
+            cong_w_p2 = min(0.30, max(0.10, 0.10 + 0.20 * (cong_100 - 1.2) / 0.6))
+            is_best = cong_100 < best_cong_at_99
+            print(f"  [restart {restart_idx}] cong_100={cong_100:.4f} → cong_w={cong_w_p2:.3f}"
+                  + ("  *** NEW BEST" if is_best else ""))
+
+            if is_best:
+                best_cong_at_99  = cong_100
+                # Keep the actual parameter tensor + warm Adam — phase 2 continues directly
+                best_pos_movable = pos_movable
+                best_optimizer   = optimizer
+                best_scheduler   = scheduler
+                measured_cong_100 = cong_100
+                CONG_W_PHASE2    = cong_w_p2
+
+        # ------------------------------------------------------------------
+        # Phase 2: continue from the winning restart's warm Adam state
+        # ------------------------------------------------------------------
+        pos_movable = best_pos_movable
+        optimizer   = best_optimizer
+        scheduler   = best_scheduler
+
+        best_loss    = float("inf")
+        best_movable = pos_movable.detach().clone()
+
+        print(f"[analytical_placer] Phase 2 ({TOTAL_STEPS - PHASE2_START} steps, "
+              f"cong_w={CONG_W_PHASE2:.3f}, cong_100={measured_cong_100:.2f})...")
+        for step in range(PHASE2_START, TOTAL_STEPS):
             optimizer.zero_grad()
 
             pos = pos_full.clone()
             pos[movable_idx] = pos_movable
-
             pos_x = pos[:, 0].clamp(half_w, cw - half_w)
             pos_y = pos[:, 1].clamp(half_h, ch - half_h)
             pos   = torch.stack([pos_x, pos_y], dim=1)
@@ -1017,21 +1103,12 @@ class AnalyticalPlacer:
             frac  = step / TOTAL_STEPS
             alpha = ALPHA_START + (ALPHA_END - ALPHA_START) * frac
 
-            den_w  = DEN_W_PHASE1  if step < PHASE2_START else DEN_W_PHASE2
-            ovl_w  = OVL_W_PHASE1  if step < PHASE2_START else OVL_W_PHASE2
-            cong_w = CONG_W_PHASE1 if step < PHASE2_START else CONG_W_PHASE2
-
             pin_xy = _compute_pin_xy(pos, data, b, port_pos)
             wl  = lse_hpwl_loss(pin_xy, data, b, alpha)
             den = density_loss(pos, sizes, cell_centers, cell_size, b, target_density=TARGET_DEN)
             ovl = macro_overlap_loss(pos, sizes, b.num_hard_macros)
-
-            if cong_w > 0:
-                cong = lroute_congestion_loss(pin_xy, data, b, device, pos=pos, sizes=sizes)
-            else:
-                cong = torch.zeros(1, device=device).squeeze()
-
-            loss = wl + den_w * den + ovl_w * ovl + cong_w * cong
+            cong = lroute_congestion_loss(pin_xy, data, b, device, pos=pos, sizes=sizes)
+            loss = wl + DEN_W_PHASE2 * den + OVL_W * ovl + CONG_W_PHASE2 * cong
             loss.backward()
 
             torch.nn.utils.clip_grad_norm_([pos_movable], GRAD_CLIP)
@@ -1042,51 +1119,24 @@ class AnalyticalPlacer:
                 pos_movable[:, 0].clamp_(half_w[movable_idx], cw - half_w[movable_idx])
                 pos_movable[:, 1].clamp_(half_h[movable_idx], ch - half_h[movable_idx])
 
-            # Adaptive CONG_W: measure L-route surrogate just before phase 2 starts.
-            # Low-congestion benchmarks (ibm09/ibm11) regressed with CONG_W=0.3 because
-            # L-route compressed macros that were already well-spread → density spike.
-            # Formula: scale from 0.10 (cong_100≤1.2) to 0.30 (cong_100≥1.8).
-            if step == PHASE2_START - 1:
-                with torch.no_grad():
-                    p_meas = pos_full.clone()
-                    p_meas[movable_idx] = pos_movable
-                    p_meas[:, 0] = p_meas[:, 0].clamp(half_w, cw - half_w)
-                    p_meas[:, 1] = p_meas[:, 1].clamp(half_h, ch - half_h)
-                    pxy_meas = _compute_pin_xy(p_meas, data, b, port_pos)
-                    cong_100 = lroute_congestion_loss(pxy_meas, data, b, device, pos=p_meas, sizes=sizes).item()
-                # Scale CONG_W from 0.10 (low cong) to 0.30 (high cong).
-                # cong_100 now includes macro blockage so values are ~0.1-0.2 higher.
-                # Keep cap at 0.30 — experiments show CONG_W>0.30 degrades ibm02/06.
-                CONG_W_PHASE2 = min(0.30, max(0.10, 0.10 + 0.20 * (cong_100 - 1.2) / 0.6))
-                measured_cong_100 = cong_100
-                print(f"  [adaptive] cong_100={cong_100:.4f} → CONG_W_PHASE2={CONG_W_PHASE2:.3f}")
-
             l = loss.item()
             if l < best_loss:
                 best_loss    = l
                 best_movable = pos_movable.detach().clone()
 
-            if step % 50 == 0:
+            if (step - PHASE2_START) % 50 == 0:
                 print(f"  step {step:4d}  loss={l:.4f}  wl={wl.item():.4f}  "
                       f"den={den.item():.6f}  cong={cong.item():.4f}  "
-                      f"den_w={den_w:.2f}  cong_w={cong_w:.2f}  alpha={alpha:.1f}")
+                      f"den_w={DEN_W_PHASE2:.2f}  cong_w={CONG_W_PHASE2:.2f}  alpha={alpha:.1f}")
 
         # Reconstruct and move to CPU
         final_gpu = pos_full.clone()
         final_gpu[movable_idx] = best_movable
         analytical_pos = final_gpu.cpu()
 
-        # Phase 3: legalize hard macros (120s cap — most benchmarks converge well
-        # within this; only ibm10's ~1100s extreme case gets truncated)
         print("[analytical_placer] Legalizing hard macros...")
         final_pos = _legalize(analytical_pos, b, time_budget_s=120.0)
 
-        # Post-legalization gradient refinement: two rounds.
-        # Round 1 (40 steps, light): recovers from legalization displacement.
-        # Round 2 (60 steps, cong-focused): heavier cong penalty for high-cong
-        #   benchmarks, or additional WL+density polish for low-cong ones.
-        # Replaces SA which never found WL improvements (all accepted moves were
-        # uphill, so best_pos always equaled the initial post-legalize position).
         cong_w_r1 = 0.5
         cong_w_r2 = min(0.8, 0.4 + 0.4 * (measured_cong_100 - 1.2) / 0.6) if measured_cong_100 > 1.2 else 0.4
         cong_w_r2 = max(0.4, cong_w_r2)
@@ -1094,7 +1144,8 @@ class AnalyticalPlacer:
         print(f"[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w={cong_w_r1:.2f})...")
         final_pos = _post_legalize_refine(final_pos, b, data, device, steps=40, cong_w=cong_w_r1)
 
-        print(f"[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w={cong_w_r2:.2f}, cong_100={measured_cong_100:.2f})...")
+        print(f"[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w={cong_w_r2:.2f}, "
+              f"cong_100={measured_cong_100:.2f})...")
         final_pos = _post_legalize_refine(final_pos, b, data, device, steps=60, cong_w=cong_w_r2)
 
         return final_pos
