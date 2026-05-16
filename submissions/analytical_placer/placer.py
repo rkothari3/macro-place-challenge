@@ -972,7 +972,7 @@ class AnalyticalPlacer:
 
         pos_full = b.macro_positions.clone().to(device)
 
-        TOTAL_STEPS  = 300
+        TOTAL_STEPS  = 400
         ALPHA_START  = 10.0
         ALPHA_END    = 30.0
         DEN_W_PHASE1 = 2.0
