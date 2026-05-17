@@ -53,5 +53,8 @@ cmake -DCMAKE_CUDA_ARCHITECTURES=native \
 make -j$(nproc)
 make install
 
+echo "[build_xplace] Installing Xplace Python dependencies..."
+pip install igraph --quiet
+
 echo "[build_xplace] Done! XPLACE_HOME=$XPLACE_HOME"
 export XPLACE_HOME=$XPLACE_HOME
