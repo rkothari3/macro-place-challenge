@@ -13,9 +13,10 @@ if [ -f "$XPLACE_HOME/main.py" ] && [ -f "$XPLACE_HOME/cpp_to_py/io_parser/io_pa
 fi
 
 echo "[build_xplace] Installing system dependencies..."
-apt-get install -y --no-install-recommends libboost-all-dev libcairo2-dev bison flex > /dev/null 2>&1
+apt-get install -y --no-install-recommends libboost-all-dev libcairo2-dev bison flex libfl-dev > /dev/null 2>&1
 
 echo "[build_xplace] Cloning Xplace..."
+rm -rf $XPLACE_HOME
 git clone --depth 1 --recurse-submodules https://github.com/cuhk-eda/Xplace $XPLACE_HOME
 
 echo "[build_xplace] Building Xplace (this takes ~5-10 min)..."
