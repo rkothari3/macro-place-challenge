@@ -17,6 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc \
         g++ \
         make \
+        bison \
+        flex \
         libboost-all-dev \
         libcairo2-dev \
         && rm -rf /var/lib/apt/lists/*
