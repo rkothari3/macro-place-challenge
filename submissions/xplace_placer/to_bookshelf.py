@@ -95,6 +95,7 @@ def write_bookshelf(b: Benchmark, outdir: str, design: str) -> str:
 
     total_pins = 0
     net_lines = []
+    kept_net_indices = []  # original net indices of non-empty nets (for .wts matching)
 
     for net_i in range(b.num_nets):
         if use_pin_level:
@@ -134,6 +135,7 @@ def write_bookshelf(b: Benchmark, outdir: str, design: str) -> str:
         for nname, ox, oy in pin_rows:
             block.append(f"\t{nname}\tB\t:\t{ox:.6f}\t{oy:.6f}")
         net_lines.append("\n".join(block))
+        kept_net_indices.append(net_i)
 
     with open(nets_path, "w") as f:
         f.write("UCLA nets 1.0\n\n")
@@ -146,9 +148,9 @@ def write_bookshelf(b: Benchmark, outdir: str, design: str) -> str:
     wts_path = os.path.join(outdir, f"{design}.wts")
     with open(wts_path, "w") as f:
         f.write("UCLA wts 1.0\n\n")
-        for net_i in range(len(net_lines)):
-            w_val = b.net_weights[net_i].item() if net_i < b.num_nets else 1.0
-            f.write(f"net_{net_i}\t{w_val:.4f}\n")
+        for orig_i in kept_net_indices:
+            w_val = b.net_weights[orig_i].item()
+            f.write(f"net_{orig_i}\t{w_val:.4f}\n")
 
     # --- .scl (synthetic rows covering entire canvas, in nm) ------------
     scl_path = os.path.join(outdir, f"{design}.scl")

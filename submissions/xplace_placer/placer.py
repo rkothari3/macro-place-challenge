@@ -184,13 +184,17 @@ class XplacePlacer:
         output_dir = "output"
         output_prefix = "placement"
 
+        # bookshelf_variety is NOT a CLI arg in Xplace (it's a params dict key set via
+        # custom_path). Xplace defaults to "ispd2005" for bookshelf format automatically.
+        # --design_name is also set from custom_path by get_custom_design_params, but
+        # args.exp_id is built before that override, so exp_id dir uses the CLI default.
+        # We therefore don't try to predict the exact output path — use glob by mtime.
         cmd = [
             sys.executable,
             os.path.join(xplace_home, "main.py"),
             "--custom_path",
             f"aux:{aux_path},design_name:{design},benchmark:iccad04",
             "--load_from_raw", "True",
-            "--bookshelf_variety", "ispd2005",
             "--mixed_size", "True",
             "--legalization", "False",
             "--detail_placement", "False",
@@ -211,23 +215,27 @@ class XplacePlacer:
         print("[xplace_placer] Running Xplace GP...")
         t0 = time.time()
         env = os.environ.copy()
-        env["PYTHONPATH"] = xplace_home + ":" + env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = xplace_home + os.pathsep + env.get("PYTHONPATH", "")
         result = subprocess.run(cmd, cwd=xplace_home, env=env)
         elapsed = time.time() - t0
         print(f"[xplace_placer] Xplace done in {elapsed:.1f}s (rc={result.returncode})")
 
-        # Locate GP output .pl file
-        gp_pl = os.path.join(result_dir, exp_id, output_dir,
-                             f"{output_prefix}_{design}_gp.pl")
-        if not os.path.exists(gp_pl):
-            candidates = glob.glob(
+        # Locate the GP output .pl file.  Xplace modifies args.exp_id with a datetime
+        # prefix before find_design_params sets args.design_name, so the actual output
+        # directory name is unpredictable.  Find it by modification time.
+        gp_candidates = glob.glob(
+            os.path.join(result_dir, "**", "*_gp.pl"), recursive=True
+        )
+        if not gp_candidates:
+            # fallback: any .pl in result_dir (may include a dp result)
+            gp_candidates = glob.glob(
                 os.path.join(result_dir, "**", "*.pl"), recursive=True
             )
-            if not candidates:
-                print("[xplace_placer] No output found — falling back to analytical")
-                return self._fallback(b)
-            gp_pl = sorted(candidates)[-1]
-            print(f"[xplace_placer] Using output: {gp_pl}")
+        if not gp_candidates:
+            print("[xplace_placer] No output .pl found — falling back to analytical")
+            return self._fallback(b)
+        gp_pl = max(gp_candidates, key=os.path.getmtime)
+        print(f"[xplace_placer] Using output: {gp_pl}")
 
         pos = read_bookshelf_pl(gp_pl, b)
         print("[xplace_placer] GP placement loaded.")
