@@ -1,0 +1,261 @@
+"""
+Xplace-based macro placer.
+
+Pipeline:
+  1. Convert Benchmark → bookshelf (.nodes/.nets/.pl/.scl/.wts/.aux)
+  2. Run Xplace GP (GPU-accelerated ePlace density + Nesterov)
+  3. Read back GP placement (bottom-left → center coords)
+  4. Legalize: pairwise separation (from analytical_placer)
+  5. Post-legalize L-route congestion + WL gradient refinement
+  6. Return final [num_macros, 2] tensor
+
+Xplace location: detected from XPLACE_HOME env var or /opt/xplace.
+Falls back to the analytical placer if Xplace is unavailable.
+
+Xplace ref: https://github.com/cuhk-eda/Xplace (CUHK, DAC'22/TCAD'23/ICCAD'24)
+"""
+
+from __future__ import annotations
+
+import glob
+import importlib.util
+import os
+import subprocess
+import sys
+import tempfile
+import time
+
+import torch
+
+from macro_place.benchmark import Benchmark
+
+# ---------------------------------------------------------------------------
+# Import proven loss + legalization functions from the analytical placer.
+# This avoids re-implementing and avoids subtle bugs.
+# ---------------------------------------------------------------------------
+_analytical_dir = os.path.join(os.path.dirname(__file__), '..', 'analytical_placer')
+_analytical_path = os.path.join(_analytical_dir, 'placer.py')
+
+for _ext_subdir in ('lroute_ext', 'density_ext'):
+    _d = os.path.join(_analytical_dir, _ext_subdir)
+    if os.path.isdir(_d) and _d not in sys.path:
+        sys.path.insert(0, _d)
+
+_spec = importlib.util.spec_from_file_location("_aplacer", _analytical_path)
+_amod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_amod)
+
+_preprocess         = _amod._preprocess
+_compute_pin_xy     = _amod._compute_pin_xy
+_lse_hpwl_loss      = _amod.lse_hpwl_loss
+_density_loss       = _amod.density_loss
+_make_cell_centers  = _amod._make_cell_centers
+_overlap_loss       = _amod.macro_overlap_loss
+_lroute_loss        = _amod.lroute_congestion_loss
+_legalize           = _amod._legalize
+
+# Per-analytical placer constant
+_TARGET_DEN = _amod.TARGET_DEN if hasattr(_amod, "TARGET_DEN") else 1.0
+
+
+# ---------------------------------------------------------------------------
+# Xplace location detection
+# ---------------------------------------------------------------------------
+
+def _find_xplace() -> str | None:
+    candidates = [
+        os.environ.get("XPLACE_HOME", ""),
+        "/opt/xplace",
+        os.path.expanduser("~/.xplace"),
+        os.path.join(os.path.dirname(__file__), "../../research_repos/Xplace"),
+    ]
+    for c in candidates:
+        if c and os.path.isfile(os.path.join(c, "main.py")):
+            return os.path.abspath(c)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Post-legalize gradient refinement (WL + congestion, Adam)
+# ---------------------------------------------------------------------------
+
+def _post_legalize_refine(
+    pos_cpu: torch.Tensor,
+    b: Benchmark,
+    data: dict,
+    device: torch.device,
+    steps: int = 60,
+    cong_w: float = 0.5,
+    wl_w: float = 1.0,
+    den_w: float = 0.1,
+    ovl_w: float = 20.0,
+    lr: float = 0.005,
+) -> torch.Tensor:
+    sizes = b.macro_sizes.to(device)
+    port_pos = b.port_positions.to(device)
+    fixed = b.macro_fixed
+    movable_idx = (~fixed).nonzero(as_tuple=True)[0]
+    cw, ch = b.canvas_width, b.canvas_height
+
+    cell_centers, cell_size = _make_cell_centers(b, device)
+
+    pos_full = pos_cpu.to(device)
+    pos_movable = pos_full[movable_idx].clone().requires_grad_(True)
+    optimizer = torch.optim.Adam([pos_movable], lr=lr)
+
+    half_w = sizes[:, 0] / 2
+    half_h = sizes[:, 1] / 2
+
+    best_loss = float("inf")
+    best_movable = pos_movable.detach().clone()
+
+    for _ in range(steps):
+        optimizer.zero_grad()
+        pos = pos_full.clone()
+        pos[movable_idx] = pos_movable
+        pos_x = pos[:, 0].clamp(half_w, cw - half_w)
+        pos_y = pos[:, 1].clamp(half_h, ch - half_h)
+        pos = torch.stack([pos_x, pos_y], dim=1)
+
+        pin_xy = _compute_pin_xy(pos, data, b, port_pos)
+        wl   = _lse_hpwl_loss(pin_xy, data, b, alpha=50.0)
+        cong = _lroute_loss(pin_xy, data, b, device, pos=pos, sizes=sizes)
+        den  = _density_loss(pos, sizes, cell_centers, cell_size, b,
+                             target_density=_TARGET_DEN)
+        ovl  = _overlap_loss(pos, sizes, b.num_hard_macros)
+        loss = wl_w * wl + cong_w * cong + den_w * den + ovl_w * ovl
+        loss.backward()
+
+        torch.nn.utils.clip_grad_norm_([pos_movable], 1.0)
+        optimizer.step()
+
+        with torch.no_grad():
+            pos_movable[:, 0].clamp_(half_w[movable_idx], cw - half_w[movable_idx])
+            pos_movable[:, 1].clamp_(half_h[movable_idx], ch - half_h[movable_idx])
+
+        l = loss.item()
+        if l < best_loss:
+            best_loss = l
+            best_movable = pos_movable.detach().clone()
+
+    final = pos_full.clone()
+    final[movable_idx] = best_movable
+    return final.cpu()
+
+
+# ---------------------------------------------------------------------------
+# Main placer class
+# ---------------------------------------------------------------------------
+
+class XplacePlacer:
+    """
+    GPU macro placer using Xplace as the global placement engine.
+    Falls back to analytical placer if Xplace is not installed.
+    """
+
+    def place(self, b: Benchmark) -> torch.Tensor:
+        xplace_home = _find_xplace()
+
+        if xplace_home is None:
+            print("[xplace_placer] WARNING: Xplace not found. "
+                  "Set XPLACE_HOME env var or install at /opt/xplace. "
+                  "Falling back to analytical placer.")
+            return self._fallback(b)
+
+        print(f"[xplace_placer] Using Xplace at: {xplace_home}")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"[xplace_placer] Device: {device}")
+
+        with tempfile.TemporaryDirectory(prefix="xplace_") as tmpdir:
+            return self._run_xplace(b, xplace_home, tmpdir, device)
+
+    def _run_xplace(
+        self, b: Benchmark, xplace_home: str, tmpdir: str, device: torch.device
+    ) -> torch.Tensor:
+        from submissions.xplace_placer.to_bookshelf import write_bookshelf, read_bookshelf_pl
+
+        design = b.name.replace("/", "_").replace(" ", "_")
+        bk_dir = os.path.join(tmpdir, "bookshelf")
+        aux_path = write_bookshelf(b, bk_dir, design)
+        print(f"[xplace_placer] Bookshelf written: {bk_dir}")
+
+        result_dir = os.path.join(tmpdir, "result")
+        exp_id = "exp0"
+        output_dir = "output"
+        output_prefix = "placement"
+
+        cmd = [
+            sys.executable,
+            os.path.join(xplace_home, "main.py"),
+            "--custom_path",
+            f"aux:{aux_path},design_name:{design},benchmark:iccad04",
+            "--load_from_raw", "True",
+            "--bookshelf_variety", "ispd2005",
+            "--mixed_size", "True",
+            "--legalization", "False",
+            "--detail_placement", "False",
+            "--write_global_placement", "True",
+            "--write_placement", "True",
+            "--result_dir", result_dir,
+            "--exp_id", exp_id,
+            "--output_dir", output_dir,
+            "--output_prefix", output_prefix,
+            "--draw_placement", "False",
+            "--verbose_cpp_log", "False",
+            "--deterministic", "True",
+            "--target_density", "0.8",
+            "--num_threads", "8",
+            "--gpu", "1" if device.type == "cuda" else "0",
+        ]
+
+        print("[xplace_placer] Running Xplace GP...")
+        t0 = time.time()
+        env = os.environ.copy()
+        env["PYTHONPATH"] = xplace_home + ":" + env.get("PYTHONPATH", "")
+        result = subprocess.run(cmd, cwd=xplace_home, env=env)
+        elapsed = time.time() - t0
+        print(f"[xplace_placer] Xplace done in {elapsed:.1f}s (rc={result.returncode})")
+
+        # Locate GP output .pl file
+        gp_pl = os.path.join(result_dir, exp_id, output_dir,
+                             f"{output_prefix}_{design}_gp.pl")
+        if not os.path.exists(gp_pl):
+            candidates = glob.glob(
+                os.path.join(result_dir, "**", "*.pl"), recursive=True
+            )
+            if not candidates:
+                print("[xplace_placer] No output found — falling back to analytical")
+                return self._fallback(b)
+            gp_pl = sorted(candidates)[-1]
+            print(f"[xplace_placer] Using output: {gp_pl}")
+
+        pos = read_bookshelf_pl(gp_pl, b)
+        print("[xplace_placer] GP placement loaded.")
+
+        # Legalize
+        print("[xplace_placer] Legalizing...")
+        t1 = time.time()
+        pos = _legalize(pos, b, time_budget_s=120.0)
+        print(f"[xplace_placer] Legalization: {time.time()-t1:.1f}s")
+
+        # Post-legalize congestion refinement
+        data = _preprocess(b, device)
+
+        print("[xplace_placer] Post-legalize refine round 1 (cong_w=0.5)...")
+        pos = _post_legalize_refine(pos, b, data, device, steps=60, cong_w=0.5)
+        pos = _legalize(pos, b, time_budget_s=30.0)
+
+        print("[xplace_placer] Post-legalize refine round 2 (cong_w=0.7)...")
+        pos = _post_legalize_refine(pos, b, data, device, steps=60, cong_w=0.7)
+        pos = _legalize(pos, b, time_budget_s=30.0)
+
+        return pos
+
+    def _fallback(self, b: Benchmark) -> torch.Tensor:
+        fallback_path = os.path.join(
+            os.path.dirname(__file__), "..", "analytical_placer", "placer.py"
+        )
+        spec = importlib.util.spec_from_file_location("_fallback_placer", fallback_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.AnalyticalPlacer().place(b)

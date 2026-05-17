@@ -1,0 +1,473 @@
+[analytical_placer] CUDA density extension loaded
+================================================================================
+evaluate · AnalyticalPlacer  (submissions/analytical_placer/placer.py)
+================================================================================
+
+  ibm01... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm01/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 45, Row: 41
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=86.5032  wl=0.3992  den=0.051968  alpha=10.0
+  [r0] step  50  loss=1.7283  wl=0.4230  den=0.001873  alpha=13.3
+  [restart 0] cong_100=1.2288 → cong_w=0.110  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=1779.5519  wl=0.4523  den=0.197368  alpha=10.0
+  [r1] step  50  loss=45.9599  wl=0.4684  den=0.006427  alpha=13.3
+  [restart 1] cong_100=2.0120 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.110, cong_100=1.23)...
+  step  100  loss=1.3339  wl=0.4357  den=0.001692  cong=1.2288  den_w=0.50  cong_w=0.11  alpha=16.7
+  step  150  loss=1.1200  wl=0.4430  den=0.008307  cong=0.9805  den_w=0.50  cong_w=0.11  alpha=20.0
+  step  200  loss=0.5557  wl=0.4480  den=0.005548  cong=0.9571  den_w=0.50  cong_w=0.11  alpha=23.3
+  step  250  loss=0.5589  wl=0.4520  den=0.005207  cong=0.9516  den_w=0.50  cong_w=0.11  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 2 passes (2.0s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.42, cong_100=1.23)...
+proxy=0.8746  (wl=0.071 den=0.628 cong=0.979)  VALID  [10.37s]
+  ibm02... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm02/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 30, Row: 27
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=95.2039  wl=0.3467  den=0.028595  alpha=10.0
+  [r0] step  50  loss=1.5926  wl=0.3540  den=0.001137  alpha=13.3
+  [restart 0] cong_100=2.5558 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=3201.3210  wl=0.4076  den=0.148444  alpha=10.0
+  [r1] step  50  loss=313.2476  wl=0.3947  den=0.052653  alpha=13.3
+  [restart 1] cong_100=3.5806 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=2.56)...
+  step  100  loss=2.0671  wl=0.3586  den=0.001164  cong=2.5558  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=0.9809  wl=0.3648  den=0.027935  cong=1.8554  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=1.2570  wl=0.3686  den=0.030936  cong=1.7499  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.9401  wl=0.3717  den=0.032423  cong=1.7188  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 1 passes (1.2s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=2.56)...
+proxy=1.2895  (wl=0.083 den=0.745 cong=1.668)  VALID  [7.61s]
+  ibm03... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm03/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 32, Row: 29
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=68.3580  wl=0.4901  den=0.034014  alpha=10.0
+  [r0] step  50  loss=0.7710  wl=0.4950  den=0.000199  alpha=13.3
+  [restart 0] cong_100=1.8327 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=2766.7854  wl=0.5476  den=0.096517  alpha=10.0
+  [r1] step  50  loss=174.6549  wl=0.5438  den=0.013221  alpha=13.3
+  [restart 1] cong_100=2.8040 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=1.83)...
+  step  100  loss=2.0650  wl=0.4951  den=0.001465  cong=1.8327  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=1.2465  wl=0.4998  den=0.010602  cong=1.3082  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=0.8753  wl=0.5044  den=0.007063  cong=1.2246  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.8717  wl=0.5075  den=0.006163  cong=1.2037  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 1 passes (1.4s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=1.83)...
+proxy=1.0944  (wl=0.095 den=0.613 cong=1.387)  VALID  [7.05s]
+  ibm04... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm04/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 31, Row: 30
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=82.5668  wl=0.4834  den=0.041775  alpha=10.0
+  [r0] step  50  loss=2.7681  wl=0.4939  den=0.000892  alpha=13.3
+  [restart 0] cong_100=1.7869 → cong_w=0.296  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=2341.0640  wl=0.5280  den=0.156969  alpha=10.0
+  [r1] step  50  loss=361.8383  wl=0.5284  den=0.033486  alpha=13.3
+  [restart 1] cong_100=2.4011 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.296, cong_100=1.79)...
+  step  100  loss=1.9625  wl=0.4997  den=0.001088  cong=1.7869  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=0.9266  wl=0.5056  den=0.009020  cong=1.2641  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=1.2162  wl=0.5094  den=0.008806  cong=1.2191  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.8715  wl=0.5124  den=0.008061  cong=1.2012  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 2 passes (3.5s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.79, cong_100=1.79)...
+proxy=1.1404  (wl=0.081 den=0.661 cong=1.458)  VALID  [9.70s]
+  ibm06... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm06/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 31, Row: 28
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=54.1745  wl=0.5241  den=0.025211  alpha=10.0
+  [r0] step  50  loss=3.9025  wl=0.5322  den=0.001044  alpha=13.3
+  [restart 0] cong_100=2.5315 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=1697.8823  wl=0.5798  den=0.115428  alpha=10.0
+  [r1] step  50  loss=177.3926  wl=0.5754  den=0.007262  alpha=13.3
+  [restart 1] cong_100=4.3703 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=2.53)...
+  step  100  loss=3.4879  wl=0.5357  den=0.001520  cong=2.5315  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=3.1836  wl=0.5420  den=0.013353  cong=1.8161  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=2.4340  wl=0.5468  den=0.012659  cong=1.7374  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=1.9259  wl=0.5504  den=0.011569  cong=1.7191  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise 100 passes (57.0s), moving to spiral
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=2.53)...
+proxy=1.3926  (wl=0.076 den=0.683 cong=1.951)  VALID  [82.41s]
+  ibm07... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm07/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 35, Row: 32
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=75.6067  wl=0.4922  den=0.057152  alpha=10.0
+  [r0] step  50  loss=1.1361  wl=0.5022  den=0.000610  alpha=13.3
+  [restart 0] cong_100=1.9052 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=3146.5269  wl=0.5440  den=0.163715  alpha=10.0
+  [r1] step  50  loss=102.1453  wl=0.5486  den=0.014227  alpha=13.3
+  [restart 1] cong_100=3.3420 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=1.91)...
+  step  100  loss=1.2797  wl=0.5059  den=0.000807  cong=1.9052  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=0.9584  wl=0.5085  den=0.017139  cong=1.4711  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=0.9292  wl=0.5106  den=0.016958  cong=1.3670  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.9237  wl=0.5131  den=0.016357  cong=1.3414  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 1 passes (1.5s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=1.91)...
+proxy=1.2125  (wl=0.077 den=0.672 cong=1.599)  VALID  [7.25s]
+  ibm08... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm08/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 38, Row: 34
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=81.7749  wl=0.4680  den=0.053245  alpha=10.0
+  [r0] step  50  loss=1.6308  wl=0.4791  den=0.001057  alpha=13.3
+  [restart 0] cong_100=2.0059 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=2521.4136  wl=0.5159  den=0.138954  alpha=10.0
+  [r1] step  50  loss=176.3808  wl=0.5207  den=0.021256  alpha=13.3
+  [restart 1] cong_100=3.6731 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=2.01)...
+  step  100  loss=1.1872  wl=0.4841  den=0.002406  cong=2.0059  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=1.0819  wl=0.4895  den=0.013724  cong=1.5333  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=0.9361  wl=0.4925  den=0.012956  cong=1.4572  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.9255  wl=0.4950  den=0.012014  cong=1.4148  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 1 passes (1.5s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=2.01)...
+proxy=1.2051  (wl=0.077 den=0.690 cong=1.566)  VALID  [7.91s]
+  ibm09... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm09/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 36, Row: 38
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=91.6177  wl=0.5030  den=0.057498  alpha=10.0
+  [r0] step  50  loss=1.2681  wl=0.5114  den=0.002756  alpha=13.3
+  [restart 0] cong_100=1.2470 → cong_w=0.116  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=3715.7490  wl=0.5575  den=0.214027  alpha=10.0
+  [r1] step  50  loss=407.1298  wl=0.5606  den=0.052186  alpha=13.3
+  [restart 1] cong_100=2.5264 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.116, cong_100=1.25)...
+  step  100  loss=0.6613  wl=0.5149  den=0.004114  cong=1.2470  den_w=0.50  cong_w=0.12  alpha=16.7
+  step  150  loss=0.9779  wl=0.5172  den=0.007481  cong=1.0487  den_w=0.50  cong_w=0.12  alpha=20.0
+  step  200  loss=0.6990  wl=0.5185  den=0.007196  cong=1.0011  den_w=0.50  cong_w=0.12  alpha=23.3
+  step  250  loss=0.6364  wl=0.5197  den=0.007163  cong=0.9773  den_w=0.50  cong_w=0.12  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 1 passes (1.1s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.43, cong_100=1.25)...
+proxy=0.9395  (wl=0.061 den=0.649 cong=1.109)  VALID  [6.83s]
+  ibm10... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm10/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 55, Row: 41
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=84.6828  wl=0.4470  den=0.017646  alpha=10.0
+  [r0] step  50  loss=2.8578  wl=0.4478  den=0.000369  alpha=13.3
+  [restart 0] cong_100=1.9086 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=15585.4727  wl=0.4983  den=0.178067  alpha=10.0
+  [r1] step  50  loss=3839.5999  wl=0.4949  den=0.068555  alpha=13.3
+  [restart 1] cong_100=3.7183 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=1.91)...
+  step  100  loss=2.1144  wl=0.4473  den=0.000476  cong=1.9086  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=0.9160  wl=0.4486  den=0.007305  cong=1.4759  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=0.8730  wl=0.4498  den=0.007179  cong=1.3988  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.8654  wl=0.4511  den=0.006561  cong=1.3700  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 1 passes (11.5s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=1.91)...
+proxy=1.1723  (wl=0.072 den=0.626 cong=1.573)  VALID  [19.39s]
+  ibm11... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm11/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 39, Row: 45
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=130.8063  wl=0.4710  den=0.067528  alpha=10.0
+  [r0] step  50  loss=1.1195  wl=0.4810  den=0.000650  alpha=13.3
+  [restart 0] cong_100=1.3456 → cong_w=0.149  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=4964.0068  wl=0.5247  den=0.182548  alpha=10.0
+  [r1] step  50  loss=504.1398  wl=0.5297  den=0.024865  alpha=13.3
+  [restart 1] cong_100=2.5590 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.149, cong_100=1.35)...
+  step  100  loss=0.7778  wl=0.4847  den=0.000661  cong=1.3456  den_w=0.50  cong_w=0.15  alpha=16.7
+  step  150  loss=0.7252  wl=0.4864  den=0.006030  cong=1.0472  den_w=0.50  cong_w=0.15  alpha=20.0
+  step  200  loss=0.7009  wl=0.4880  den=0.005920  cong=0.9999  den_w=0.50  cong_w=0.15  alpha=23.3
+  step  250  loss=0.6385  wl=0.4895  den=0.005884  cong=0.9834  den_w=0.50  cong_w=0.15  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 1 passes (2.3s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.50, cong_100=1.35)...
+proxy=0.9942  (wl=0.060 den=0.633 cong=1.236)  VALID  [8.70s]
+  ibm12... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm12/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 47, Row: 47
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=172.1914  wl=0.5086  den=0.041119  alpha=10.0
+  [r0] step  50  loss=3.2150  wl=0.5149  den=0.000910  alpha=13.3
+  [restart 0] cong_100=2.2716 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=12996.0928  wl=0.5623  den=0.157333  alpha=10.0
+  [r1] step  50  loss=2563.7832  wl=0.5638  den=0.033091  alpha=13.3
+  [restart 1] cong_100=4.7118 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=2.27)...
+  step  100  loss=2.2819  wl=0.5171  den=0.000871  cong=2.2716  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=1.3390  wl=0.5192  den=0.017396  cong=1.7289  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=1.0406  wl=0.5211  den=0.013784  cong=1.6362  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=1.0079  wl=0.5227  den=0.013366  cong=1.5950  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 1 passes (7.2s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=2.27)...
+proxy=1.3563  (wl=0.067 den=0.663 cong=1.916)  VALID  [14.86s]
+  ibm13... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm13/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 43, Row: 43
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=158.0225  wl=0.4672  den=0.077865  alpha=10.0
+  [r0] step  50  loss=2.0949  wl=0.4767  den=0.000991  alpha=13.3
+  [restart 0] cong_100=1.5527 → cong_w=0.218  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=3990.0056  wl=0.5218  den=0.223965  alpha=10.0
+  [r1] step  50  loss=376.3068  wl=0.5243  den=0.045215  alpha=13.3
+  [restart 1] cong_100=2.7433 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.218, cong_100=1.55)...
+  step  100  loss=1.2841  wl=0.4806  den=0.000760  cong=1.5527  den_w=0.50  cong_w=0.22  alpha=16.7
+  step  150  loss=1.1851  wl=0.4827  den=0.010380  cong=1.1898  den_w=0.50  cong_w=0.22  alpha=20.0
+  step  200  loss=0.7375  wl=0.4846  den=0.009505  cong=1.1405  den_w=0.50  cong_w=0.22  alpha=23.3
+  step  250  loss=0.7340  wl=0.4864  den=0.008175  cong=1.1193  den_w=0.50  cong_w=0.22  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 1 passes (3.0s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.64, cong_100=1.55)...
+proxy=1.0828  (wl=0.060 den=0.652 cong=1.393)  VALID  [9.92s]
+  ibm14... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm14/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 49, Row: 44
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=162.1366  wl=0.5078  den=0.114353  alpha=10.0
+  [r0] step  50  loss=5.0282  wl=0.5181  den=0.001868  alpha=13.3
+  [restart 0] cong_100=1.9395 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=4325.5298  wl=0.5592  den=0.198886  alpha=10.0
+  [r1] step  50  loss=359.0496  wl=0.5632  den=0.005515  alpha=13.3
+  [restart 1] cong_100=4.0476 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=1.94)...
+  step  100  loss=2.1300  wl=0.5228  den=0.001084  cong=1.9395  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=2.2092  wl=0.5252  den=0.014414  cong=1.4836  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=1.4246  wl=0.5268  den=0.011840  cong=1.4186  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.9958  wl=0.5279  den=0.011240  cong=1.3961  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise TIME CAP after 18 passes (123.8s) — spiral handles remainder
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=1.94)...
+proxy=1.3056  (wl=0.060 den=0.671 cong=1.821)  VALID  [143.69s]
+  ibm15... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm15/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 57, Row: 38
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=141.9492  wl=0.5473  den=0.100723  alpha=10.0
+  [r0] step  50  loss=2.9327  wl=0.5565  den=0.001594  alpha=13.3
+  [restart 0] cong_100=1.8430 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=5877.8145  wl=0.5980  den=0.190377  alpha=10.0
+  [r1] step  50  loss=1756.6395  wl=0.6021  den=0.027699  alpha=13.3
+  [restart 1] cong_100=3.2746 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=1.84)...
+  step  100  loss=1.3254  wl=0.5599  den=0.001138  cong=1.8430  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=1.5080  wl=0.5610  den=0.013115  cong=1.4830  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=0.9958  wl=0.5623  den=0.011073  cong=1.4268  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.9897  wl=0.5632  den=0.010261  cong=1.4046  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 1 passes (3.6s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=1.84)...
+proxy=1.3303  (wl=0.065 den=0.675 cong=1.854)  VALID  [10.63s]
+  ibm16... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm16/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 45, Row: 48
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=84.4079  wl=0.4929  den=0.057435  alpha=10.0
+  [r0] step  50  loss=1.4626  wl=0.4992  den=0.000859  alpha=13.3
+  [restart 0] cong_100=1.7617 → cong_w=0.287  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=6635.0283  wl=0.5465  den=0.214115  alpha=10.0
+  [r1] step  50  loss=1223.4417  wl=0.5481  den=0.039033  alpha=13.3
+  [restart 1] cong_100=3.5868 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.287, cong_100=1.76)...
+  step  100  loss=1.2260  wl=0.5010  den=0.000906  cong=1.7617  den_w=0.50  cong_w=0.29  alpha=16.7
+  step  150  loss=1.0595  wl=0.5037  den=0.013875  cong=1.4411  den_w=0.50  cong_w=0.29  alpha=20.0
+  step  200  loss=0.9046  wl=0.5059  den=0.012982  cong=1.3658  den_w=0.50  cong_w=0.29  alpha=23.3
+  step  250  loss=0.9154  wl=0.5075  den=0.012555  cong=1.3364  den_w=0.50  cong_w=0.29  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 1 passes (3.5s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.77, cong_100=1.76)...
+proxy=1.2682  (wl=0.056 den=0.678 cong=1.747)  VALID  [12.53s]
+  ibm17... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm17/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 51, Row: 44
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=208.5218  wl=0.5082  den=0.106810  alpha=10.0
+  [r0] step  50  loss=5.2368  wl=0.5168  den=0.000525  alpha=13.3
+  [restart 0] cong_100=1.9909 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=5698.3169  wl=0.5600  den=0.189454  alpha=10.0
+  [r1] step  50  loss=526.0905  wl=0.5641  den=0.005134  alpha=13.3
+  [restart 1] cong_100=4.1578 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=1.99)...
+  step  100  loss=3.8887  wl=0.5202  den=0.000263  cong=1.9909  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=1.1800  wl=0.5225  den=0.011512  cong=1.5769  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=1.4996  wl=0.5242  den=0.009952  cong=1.4968  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=1.0133  wl=0.5255  den=0.009654  cong=1.4641  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 1 passes (10.7s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=1.99)...
+proxy=1.4297  (wl=0.062 den=0.676 cong=2.060)  VALID  [19.92s]
+  ibm18... #[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm18/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 55, Row: 39
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=79.3956  wl=0.4595  den=0.168465  alpha=10.0
+  [r0] step  50  loss=2.0779  wl=0.4710  den=0.004669  alpha=13.3
+  [restart 0] cong_100=2.0824 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=1997.1077  wl=0.5161  den=0.237312  alpha=10.0
+  [r1] step  50  loss=255.4393  wl=0.5218  den=0.007661  alpha=13.3
+  [restart 1] cong_100=3.6593 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=2.08)...
+  step  100  loss=1.2525  wl=0.4757  den=0.002273  cong=2.0824  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=1.0965  wl=0.4800  den=0.024032  cong=1.6665  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=0.9709  wl=0.4827  den=0.020283  cong=1.5937  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.9633  wl=0.4847  den=0.018322  cong=1.5646  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] pairwise converged in 1 passes (2.2s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=2.08)...
+proxy=1.5281  (wl=0.063 den=0.729 cong=2.200)  VALID  [9.25s]
+
+--------------------------------------------------------------------------------
+    Benchmark     Proxy        SA   RePlAce     vs SA  vs RePlAce  Overlaps
+--------------------------------------------------------------------------------
+        ibm01    0.8746    1.3166    0.9976    +33.6%      +12.3%         0
+        ibm02    1.2895    1.9072    1.8370    +32.4%      +29.8%         0
+        ibm03    1.0944    1.7401    1.3222    +37.1%      +17.2%         0
+        ibm04    1.1404    1.5037    1.3024    +24.2%      +12.4%         0
+        ibm06    1.3926    2.5057    1.6187    +44.4%      +14.0%         0
+        ibm07    1.2125    2.0229    1.4633    +40.1%      +17.1%         0
+        ibm08    1.2051    1.9239    1.4285    +37.4%      +15.6%         0
+        ibm09    0.9395    1.3875    1.1194    +32.3%      +16.1%         0
+        ibm10    1.1723    2.1108    1.5009    +44.5%      +21.9%         0
+        ibm11    0.9942    1.7111    1.1774    +41.9%      +15.6%         0
+        ibm12    1.3563    2.8261    1.7261    +52.0%      +21.4%         0
+        ibm13    1.0828    1.9141    1.3355    +43.4%      +18.9%         0
+        ibm14    1.3056    2.2750    1.5436    +42.6%      +15.4%         0
+        ibm15    1.3303    2.3000    1.5159    +42.2%      +12.2%         0
+        ibm16    1.2682    2.2337    1.4780    +43.2%      +14.2%         0
+        ibm17    1.4297    3.6726    1.6446    +61.1%      +13.1%         0
+        ibm18    1.5281    2.7755    1.7722    +44.9%      +13.8%         0
+--------------------------------------------------------------------------------
+          AVG    1.2127    2.1251    1.4578    +42.9%      +16.8%         0
+
+Total runtime: 388.00s
+
