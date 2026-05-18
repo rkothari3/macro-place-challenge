@@ -221,9 +221,20 @@ class XplacePlacer:
             "--custom_path",
             f"aux:{aux_path},design_name:{design},benchmark:iccad04",
             "--load_from_raw", "True",
+            # mixed_size=False: these benchmarks are all macros of varying size
+            # with no real std cells. Xplace's height-based classifier mislabels
+            # the smaller macros as std cells, so the two-stage mixed-size flow
+            # leaves ~1 movable macro and NaN-diverges. Treat all nodes uniformly.
             "--mixed_size", "False",
-            "--legalization", "False",
-            "--detail_placement", "False",
+            # Enable Xplace's own GPU legalization + detailed placement (gpudp:
+            # greedy+abacus legalization, then kReorder/ISM refinement). This is
+            # the back-end that turns the spread GP placement into a tight legal
+            # one with recovered wirelength. We previously disabled it and used a
+            # weak custom legalizer on the raw spread GP output — that was the
+            # core mistake. Note: detail_placement is force-disabled unless
+            # legalization is True.
+            "--legalization", "True",
+            "--detail_placement", "True",
             "--write_global_placement", "True",
             "--write_placement", "True",
             "--result_dir", result_dir,
@@ -233,11 +244,15 @@ class XplacePlacer:
             "--draw_placement", "False",
             "--verbose_cpp_log", "False",
             "--deterministic", "True",
-            # IBM macro benchmarks have no real standard cells, so GP overflow
-            # plateaus around ~0.09 and never reaches the 0.07 default. Without
-            # a reachable target, no best solution is ever recorded and density
-            # weight spirals to NaN. Stop at 0.15 so a clean placement is saved.
-            "--stop_overflow", "0.15",
+            # These all-macro benchmarks are ~80% utilization; GP overflow
+            # cannot drop below ~0.18. The 0.07 default is unreachable, so no
+            # best solution is recorded and density weight spirals to NaN; the
+            # "Large plateau -> Kill" also fires (it triggers only while
+            # overflow >= stop_overflow). Setting stop_overflow ABOVE the floor
+            # (0.25) both suppresses the kill and lets a real best solution be
+            # recorded once GP converges, then it stops gracefully via the life
+            # countdown instead of returning a bad rollback.
+            "--stop_overflow", "0.25",
             "--target_density", "0.8",
             "--num_threads", "2",
             "--gpu", "0" if device.type == "cuda" else "-1",
@@ -251,62 +266,46 @@ class XplacePlacer:
         elapsed = time.time() - t0
         print(f"[xplace_placer] Xplace done in {elapsed:.1f}s (rc={result.returncode})")
 
-        # Locate the GP output .pl file.  Xplace modifies args.exp_id with a datetime
-        # prefix before find_design_params sets args.design_name, so the actual output
-        # directory name is unpredictable.  Find it by modification time.
-        gp_candidates = glob.glob(
-            os.path.join(result_dir, "**", "*_gp.pl"), recursive=True
-        )
-        if not gp_candidates:
-            # fallback: any .pl in result_dir (may include a dp result)
-            gp_candidates = glob.glob(
-                os.path.join(result_dir, "**", "*.pl"), recursive=True
-            )
-        if not gp_candidates:
+        # Locate the output .pl file. Xplace prefixes args.exp_id with a
+        # datetime before find_design_params sets args.design_name, so the
+        # output directory name is unpredictable — glob and pick by mtime.
+        # Prefer the FINAL detailed-placement result (*_dp.pl); fall back to
+        # the global-placement result (*_gp.pl), then any .pl.
+        def _find(pattern: str):
+            return glob.glob(os.path.join(result_dir, "**", pattern),
+                              recursive=True)
+
+        candidates = _find("*_dp.pl")
+        stage = "DP"
+        if not candidates:
+            candidates = _find("*_gp.pl")
+            stage = "GP"
+        if not candidates:
+            candidates = _find("*.pl")
+            stage = "?"
+        if not candidates:
             print("[xplace_placer] No output .pl found — falling back to analytical")
             return self._fallback(b)
-        gp_pl = max(gp_candidates, key=os.path.getmtime)
-        print(f"[xplace_placer] Using output: {gp_pl}")
+        out_pl = max(candidates, key=os.path.getmtime)
+        print(f"[xplace_placer] Using {stage} output: {out_pl}")
 
-        pos = read_bookshelf_pl(gp_pl, b)
+        pos = read_bookshelf_pl(out_pl, b)
 
-        # Bug 1: Xplace's GP can diverge to NaN/Inf (density weight spiral) yet
-        # still write a .pl with non-finite coords. read_bookshelf_pl copies
-        # them through silently. Detect and fall back before they poison
-        # legalization.
+        # Bug 1: Xplace's GP can diverge to NaN/Inf (density-weight spiral) yet
+        # still write a .pl with non-finite coords. Detect and fall back.
         if not torch.isfinite(pos).all():
-            print("[xplace_placer] WARNING: Xplace GP produced non-finite "
+            print("[xplace_placer] WARNING: Xplace produced non-finite "
                   "coordinates (diverged) — falling back to analytical.")
             return self._fallback(b)
-        print("[xplace_placer] GP placement loaded.")
+        print(f"[xplace_placer] {stage} placement loaded "
+              f"(Xplace legalization + DP done in-engine).")
 
-        # Legalize
-        print("[xplace_placer] Legalizing...")
-        t1 = time.time()
-        pos = _legalize(pos, b, time_budget_s=120.0)
-        print(f"[xplace_placer] Legalization: {time.time()-t1:.1f}s")
-
-        # Post-legalize congestion refinement
+        # Bug 2 safety net: a poorly-converged GP can still lose to the plain
+        # analytical placer (observed ibm01: 0.9459 vs 0.8940). Compute both
+        # and keep the better one under a surrogate that matches the real
+        # proxy weights (1.0*WL + 0.5*Cong + 0.5*Den). Guarantees the Xplace
+        # placer never regresses below the analytical baseline.
         data = _preprocess(b, device)
-
-        print("[xplace_placer] Post-legalize refine round 1 (cong_w=0.5)...")
-        pos = _post_legalize_refine(pos, b, data, device, steps=60, cong_w=0.5)
-        pos = _legalize(pos, b, time_budget_s=30.0)
-
-        print("[xplace_placer] Post-legalize refine round 2 (cong_w=0.7)...")
-        pos = _post_legalize_refine(pos, b, data, device, steps=60, cong_w=0.7)
-        pos = _legalize(pos, b, time_budget_s=30.0)
-
-        if not torch.isfinite(pos).all():
-            print("[xplace_placer] WARNING: non-finite positions after "
-                  "legalize/refine — falling back to analytical.")
-            return self._fallback(b)
-
-        # Bug 2: A plateaued GP can leave nodes in poor positions so that the
-        # Xplace pipeline loses to the plain analytical placer (observed
-        # ibm01: 0.9459 vs 0.8940). Compute both and keep the better one under
-        # a surrogate that matches the real proxy weights. This makes the
-        # Xplace placer never regress below the analytical baseline.
         print("[xplace_placer] Computing analytical fallback for comparison...")
         pos_fb = self._fallback(b)
 
