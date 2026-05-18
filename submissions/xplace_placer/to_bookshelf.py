@@ -157,9 +157,23 @@ def write_bookshelf(b: Benchmark, outdir: str, design: str) -> str:
     W_nm = _nm(b.canvas_width)
     H_nm = _nm(b.canvas_height)
 
-    # Use evaluation grid for row count; rows in nm, sitewidth = 1 nm
-    n_rows = max(b.grid_rows, 10)
-    row_h_nm = max(1, H_nm // n_rows)
+    # Xplace asserts: SCL row Height == gcd(all movable node heights).
+    # Movable macros (non-terminal in .nodes) are the only "standard cells" here.
+    # Our nm values are multiples of 100 (0.1 µm precision × 1000), so gcd is ≥ 100.
+    movable_heights_nm = [
+        _nm(b.macro_sizes[i, 1].item())
+        for i in range(num_macros)
+        if not b.macro_fixed[i].item()
+    ]
+    if movable_heights_nm:
+        row_h_nm = movable_heights_nm[0]
+        for h in movable_heights_nm[1:]:
+            row_h_nm = math.gcd(row_h_nm, h)
+        row_h_nm = max(1, row_h_nm)
+    else:
+        row_h_nm = max(1, H_nm // max(b.grid_rows, 10))
+
+    n_rows = max(1, H_nm // row_h_nm)
     n_sites = max(1, W_nm // 1)   # 1 site = 1 nm
 
     with open(scl_path, "w") as f:
