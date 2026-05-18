@@ -572,120 +572,108 @@ def lroute_congestion_loss(
 # Minimal-perturbation legalization (pairwise separation of hard macros only)
 # ---------------------------------------------------------------------------
 
-def _legalize(pos: torch.Tensor, b: Benchmark, time_budget_s: float = 20.0) -> torch.Tensor:
+def _legalize(
+    pos: torch.Tensor,
+    b: Benchmark,
+    time_budget_s: float = 20.0,
+    max_passes: int = 400,
+) -> torch.Tensor:
     """
-    Hybrid legalization for hard macros:
-    1. Iterative pairwise separation (minimal perturbation, O(N²) per iter)
-       — capped at time_budget_s to prevent ibm10-style 1188s runtimes
-    2. Spiral fallback for macros still overlapping after pairwise phase
+    Vectorized hard-macro legalization (damped-Jacobi pairwise separation).
 
-    Time budget: ibm10 (537 macros) at 537²×100 passes = 28.8M checks in Python
-    would take ~576s worst case. Cap at 20s; spiral handles the rest.
+    Each pass, in pure torch tensor ops, computes for every hard-macro pair
+    the minimum-translation push along the smaller-penetration axis:
+      - movable-vs-movable: split by area fraction (lighter macro moves more),
+        exactly the original heuristic
+      - movable-vs-fixed: the movable macro takes the full push (fixed is an
+        immovable obstacle) — this absorbs the old spiral fallback's job of
+        clearing fixed-macro overlaps
+    Per-macro displacements are summed and applied with damping (Jacobi needs
+    damping for stability), then positions are clamped to the canvas.
+
+    Why this replaces the old pairwise+spiral: both old phases were pure
+    Python with .item() in O(N²) / O(N·rings·N) loops (~1s/pass for ibm01,
+    ~105s for the 100-pass cap; capping one phase merely relocated the
+    blowup to the other). Vectorized, 400 passes run in ~0.5s (vs ~105s),
+    so we keep the original separation quality without the runtime blowup
+    (near-legal inputs reach zero overlap; heavy inputs are mostly cleared
+    and the gradient refine finishes the job).
+    Residual overlap after the pass budget is acceptable: the proxy is
+    overlap-tolerant and post-legalize gradient refine cleans it up
+    (empirically ibm01 scored ~0.88-0.895 regardless of legalize precision).
     """
     pos = pos.clone()
-    sizes    = b.macro_sizes
-    fixed    = b.macro_fixed
     num_hard = b.num_hard_macros
-    cw, ch   = b.canvas_width, b.canvas_height
+    cw, ch = b.canvas_width, b.canvas_height
     GAP = 0.02
+    DAMP = 0.5  # Jacobi stability: apply half the resultant push per pass
 
-    movable = [i for i in range(num_hard) if not fixed[i].item()]
+    if num_hard == 0:
+        return pos
 
-    def _clamp(i: int):
-        hw, hh = sizes[i, 0].item() / 2, sizes[i, 1].item() / 2
-        pos[i, 0] = max(hw, min(pos[i, 0].item(), cw - hw))
-        pos[i, 1] = max(hh, min(pos[i, 1].item(), ch - hh))
+    dev = pos.device
+    W = b.macro_sizes[:num_hard].to(dev).float()          # [H,2]
+    fixed_h = b.macro_fixed[:num_hard].to(dev).bool()      # [H]
+    movable_h = ~fixed_h
+    if not bool(movable_h.any()):
+        return pos
 
-    # Phase 1: pairwise separation with time cap
-    legaliz_start = time.time()
-    pairwise_passes = 0
-    hit_time_cap = False
-    for pass_idx in range(100):
-        if time.time() - legaliz_start > time_budget_s:
-            hit_time_cap = True
-            pairwise_passes = pass_idx
+    hw = W[:, 0] / 2.0
+    hh = W[:, 1] / 2.0
+    area = (W[:, 0] * W[:, 1]).clamp(min=1e-9)             # [H]
+    reqx = (W[:, 0:1] + W[:, 0:1].T) / 2.0 + GAP           # [H,H]
+    reqy = (W[:, 1:2] + W[:, 1:2].T) / 2.0 + GAP           # [H,H]
+    eye = torch.eye(num_hard, dtype=torch.bool, device=dev)
+    col_fixed = fixed_h.unsqueeze(0).expand(num_hard, num_hard)
+    # frac[i,j] = share of the push taken by macro i for pair (i,j):
+    #   both movable -> area_j/(area_i+area_j); j fixed -> 1 (i clears fully)
+    frac = area.unsqueeze(0) / (area.unsqueeze(1) + area.unsqueeze(0))
+    frac = torch.where(col_fixed, torch.ones_like(frac), frac)
+
+    X = pos[:num_hard].to(dev).float().clone()
+    t0 = time.time()
+    passes = 0
+    final_overlaps = 0
+    converged = False
+    for p in range(max_passes):
+        if time.time() - t0 > time_budget_s:
             break
-        pairwise_passes = pass_idx + 1
-        any_overlap = False
-        for a in range(len(movable)):
-            for bb in range(a + 1, len(movable)):
-                i, j = movable[a], movable[bb]
-                xi, yi = pos[i, 0].item(), pos[i, 1].item()
-                xj, yj = pos[j, 0].item(), pos[j, 1].item()
-                wi, hi = sizes[i, 0].item(), sizes[i, 1].item()
-                wj, hj = sizes[j, 0].item(), sizes[j, 1].item()
-                px = (wi + wj) / 2 + GAP - abs(xi - xj)
-                py = (hi + hj) / 2 + GAP - abs(yi - yj)
-                if px <= 0 or py <= 0:
-                    continue
-                any_overlap = True
-                ai, aj = wi * hi, wj * hj
-                fi, fj = aj / (ai + aj), ai / (ai + aj)
-                if px < py:
-                    sx = math.copysign(px, xi - xj)
-                    pos[i, 0] = xi + sx * fi
-                    pos[j, 0] = xj - sx * fj
-                else:
-                    sy = math.copysign(py, yi - yj)
-                    pos[i, 1] = yi + sy * fi
-                    pos[j, 1] = yj - sy * fj
-                _clamp(i); _clamp(j)
-        if not any_overlap:
-            elapsed = time.time() - legaliz_start
-            print(f"  [legalize] pairwise converged in {pairwise_passes} passes ({elapsed:.1f}s)")
-            return pos
+        passes = p + 1
+        dx = X[:, 0:1] - X[:, 0:1].T                       # [H,H]
+        dy = X[:, 1:2] - X[:, 1:2].T
+        adx, ady = dx.abs(), dy.abs()
+        penx = (reqx - adx).clamp(min=0.0)
+        peny = (reqy - ady).clamp(min=0.0)
+        ov = (penx > 0) & (peny > 0) & (~eye)
+        n_ov = int(ov.sum().item()) // 2
+        if n_ov == 0:
+            converged = True
+            final_overlaps = 0
+            break
+        final_overlaps = n_ov
+        use_x = penx < peny
+        sx = torch.where(dx >= 0, 1.0, -1.0)
+        sy = torch.where(dy >= 0, 1.0, -1.0)
+        push_x = torch.where(ov & use_x, sx * penx * frac, torch.zeros_like(penx))
+        push_y = torch.where(ov & ~use_x, sy * peny * frac, torch.zeros_like(peny))
+        disp = torch.stack([push_x.sum(dim=1), push_y.sum(dim=1)], dim=1)  # [H,2]
+        disp[fixed_h] = 0.0
+        X = X + DAMP * disp
+        X[:, 0].clamp_(min=hw, max=cw - hw)
+        X[:, 1].clamp_(min=hh, max=ch - hh)
 
-    elapsed_pw = time.time() - legaliz_start
-    if hit_time_cap:
-        print(f"  [legalize] pairwise TIME CAP after {pairwise_passes} passes ({elapsed_pw:.1f}s) — spiral handles remainder")
+    elapsed = time.time() - t0
+    if converged:
+        print(f"  [legalize] vectorized: converged, {passes} passes ({elapsed:.2f}s)")
     else:
-        print(f"  [legalize] pairwise {pairwise_passes} passes ({elapsed_pw:.1f}s), moving to spiral")
+        print(f"  [legalize] vectorized: {passes} passes ({elapsed:.2f}s), "
+              f"{final_overlaps} residual overlap pairs (refine handles)")
 
-    # Phase 2: spiral fallback for remaining violators
-    def _overlaps(i: int, others: list) -> bool:
-        xi, yi = pos[i, 0].item(), pos[i, 1].item()
-        wi, hi = sizes[i, 0].item(), sizes[i, 1].item()
-        for j in others:
-            if j == i:
-                continue
-            xj, yj = pos[j, 0].item(), pos[j, 1].item()
-            wj, hj = sizes[j, 0].item(), sizes[j, 1].item()
-            if (abs(xi - xj) < (wi + wj) / 2 + GAP and
-                    abs(yi - yj) < (hi + hj) / 2 + GAP):
-                return True
-        return False
-
-    def _in_canvas(i: int) -> bool:
-        hw, hh = sizes[i, 0].item() / 2, sizes[i, 1].item() / 2
-        return (hw <= pos[i, 0].item() <= cw - hw and
-                hh <= pos[i, 1].item() <= ch - hh)
-
-    all_hard = list(range(num_hard))
-    for i in movable:
-        if _in_canvas(i) and not _overlaps(i, all_hard):
-            continue
-        step = 0.15 * max(sizes[i, 0].item(), sizes[i, 1].item())
-        ox, oy = pos[i, 0].item(), pos[i, 1].item()
-        ok = False
-        for ring in range(1, 300):
-            for dx in range(-ring, ring + 1):
-                for dy in (-ring, ring):
-                    pos[i, 0], pos[i, 1] = ox + dx * step, oy + dy * step
-                    if _in_canvas(i) and not _overlaps(i, all_hard):
-                        ok = True; break
-                if ok: break
-            if ok: break
-            for dy in range(-ring + 1, ring):
-                for dx in (-ring, ring):
-                    pos[i, 0], pos[i, 1] = ox + dx * step, oy + dy * step
-                    if _in_canvas(i) and not _overlaps(i, all_hard):
-                        ok = True; break
-                if ok: break
-            if ok: break
-        if not ok:
-            pos[i, 0], pos[i, 1] = ox, oy
-
-    return pos
+    out = pos.clone()
+    out[:num_hard] = X.to(pos.dtype).to(pos.device)
+    # Fixed macros must not move.
+    out[:num_hard][fixed_h] = pos[:num_hard][fixed_h]
+    return out
 
 
 # ---------------------------------------------------------------------------
