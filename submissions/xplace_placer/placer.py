@@ -75,24 +75,46 @@ def _find_xplace() -> str | None:
     return None
 
 
-def _patch_xplace_numpy2(xplace_home: str) -> None:
+_NUMPY2_SHIM = '''\
+# Auto-injected by xplace_placer. Restores NumPy<2.0 aliases removed in
+# NumPy 2.0 so the unmodified Xplace source runs under Colab's NumPy 2.x.
+# Loaded automatically at interpreter startup via PYTHONPATH (sitecustomize).
+try:
+    import numpy as _np
+    _alias = {
+        "bool8": "bool_", "object0": "object_", "int0": "intp",
+        "uint0": "uintp", "void0": "void", "str0": "str_",
+        "bytes0": "bytes_", "float_": "float64", "complex_": "complex128",
+        "unicode_": "str_", "string_": "bytes_", "longfloat": "longdouble",
+        "singlecomplex": "complex64", "cfloat": "complex128",
+        "longcomplex": "clongdouble", "clongfloat": "clongdouble",
+        "round_": "round", "product": "prod", "cumproduct": "cumprod",
+        "sometrue": "any", "alltrue": "all", "row_stack": "vstack",
+        "in1d": "isin", "trapz": "trapezoid",
+        "NaN": "nan", "NAN": "nan", "Inf": "inf", "Infinity": "inf",
+        "infty": "inf", "PINF": "inf",
+    }
+    for _o, _n in _alias.items():
+        if not hasattr(_np, _o) and hasattr(_np, _n):
+            setattr(_np, _o, getattr(_np, _n))
+except Exception:
+    pass
+'''
+
+
+def _install_numpy2_shim(shim_dir: str) -> str:
     """
-    Xplace ships `np.round_(...)` in src/core/macro_legalization.py, which was
-    removed in NumPy 2.0 and crashes the detailed-placement path on Colab
-    (AttributeError: `np.round_` was removed). Rewrite it to `np.round(` in
-    place. Idempotent and best-effort — never abort the placer over this.
+    Xplace's source uses NumPy<2.0 aliases (np.round_, np.bool8, ...) removed
+    in NumPy 2.0; under Colab's NumPy 2.x its detailed-placement path crashes
+    with AttributeError. Rather than chase each symbol with source edits, drop
+    a `sitecustomize.py` on PYTHONPATH: CPython auto-imports it at interpreter
+    startup (before Xplace imports numpy), restoring the whole removed-alias
+    set in one shot. Returns the directory to prepend to PYTHONPATH.
     """
-    target = os.path.join(xplace_home, "src", "core", "macro_legalization.py")
-    try:
-        with open(target, "r") as f:
-            src = f.read()
-        if "np.round_(" in src:
-            with open(target, "w") as f:
-                f.write(src.replace("np.round_(", "np.round("))
-            print(f"[xplace_placer] Patched np.round_ -> np.round in {target}")
-    except OSError as e:
-        print(f"[xplace_placer] WARNING: could not patch np.round_ ({e}); "
-              "Xplace detailed placement may crash under NumPy 2.0.")
+    os.makedirs(shim_dir, exist_ok=True)
+    with open(os.path.join(shim_dir, "sitecustomize.py"), "w") as f:
+        f.write(_NUMPY2_SHIM)
+    return shim_dir
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +231,6 @@ class XplacePlacer:
             return self._fallback(b)
 
         print(f"[xplace_placer] Using Xplace at: {xplace_home}")
-        _patch_xplace_numpy2(xplace_home)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"[xplace_placer] Device: {device}")
 
@@ -284,7 +305,12 @@ class XplacePlacer:
         print("[xplace_placer] Running Xplace GP...")
         t0 = time.time()
         env = os.environ.copy()
-        env["PYTHONPATH"] = xplace_home + os.pathsep + env.get("PYTHONPATH", "")
+        # Prepend a sitecustomize shim dir so the Xplace subprocess restores
+        # NumPy<2.0 aliases (np.round_, np.bool8, ...) before importing numpy.
+        shim_dir = _install_numpy2_shim(os.path.join(tmpdir, "np2shim"))
+        env["PYTHONPATH"] = os.pathsep.join(
+            [shim_dir, xplace_home, env.get("PYTHONPATH", "")]
+        )
         result = subprocess.run(cmd, cwd=xplace_home, env=env)
         elapsed = time.time() - t0
         print(f"[xplace_placer] Xplace done in {elapsed:.1f}s (rc={result.returncode})")
