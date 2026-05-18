@@ -207,11 +207,29 @@ def read_bookshelf_pl(pl_path: str, b: Benchmark) -> torch.Tensor:
     Read Xplace output .pl file and return [num_macros, 2] tensor of
     CENTER coordinates in microns.
 
-    Xplace writes bottom-left in nm (integers); we convert back:
-      center_um = (bl_nm + size_nm/2) / SCALE
+    Xplace writes bottom-left in SITE UNITS where site_width = gcd of all
+    movable node widths+heights (in nm). For IBM benchmarks with 0.1µm
+    precision, all sizes are multiples of 100nm → site_width = 100nm.
+
+    Conversion: center_um = (bl_sites * site_w_nm + size_nm/2) / SCALE
     """
     macro_names = [_safe_name(n) for n in b.macro_names]
     name_to_idx = {n: i for i, n in enumerate(macro_names)}
+
+    # Compute site_width_nm = gcd of all movable node widths AND heights (nm).
+    # This mirrors what Xplace's C++ parser computes internally.
+    sizes_nm: list[int] = []
+    for i in range(b.num_macros):
+        if not b.macro_fixed[i].item():
+            sizes_nm.append(_nm(b.macro_sizes[i, 0].item()))
+            sizes_nm.append(_nm(b.macro_sizes[i, 1].item()))
+    if sizes_nm:
+        site_w_nm = sizes_nm[0]
+        for s in sizes_nm[1:]:
+            site_w_nm = math.gcd(site_w_nm, s)
+        site_w_nm = max(1, site_w_nm)
+    else:
+        site_w_nm = 1
 
     pos = b.macro_positions.clone()  # fallback = original positions
 
@@ -227,14 +245,16 @@ def read_bookshelf_pl(pl_path: str, b: Benchmark) -> torch.Tensor:
             if name not in name_to_idx:
                 continue
             try:
-                bl_x_nm = float(parts[1])
-                bl_y_nm = float(parts[2])
+                bl_x_sites = float(parts[1])
+                bl_y_sites = float(parts[2])
             except ValueError:
                 continue
             idx = name_to_idx[name]
             w_nm = b.macro_sizes[idx, 0].item() * _SCALE
             h_nm = b.macro_sizes[idx, 1].item() * _SCALE
-            # convert nm bottom-left → micron center
+            # convert site-unit bottom-left → micron center
+            bl_x_nm = bl_x_sites * site_w_nm
+            bl_y_nm = bl_y_sites * site_w_nm
             pos[idx, 0] = (bl_x_nm + w_nm / 2.0) / _SCALE
             pos[idx, 1] = (bl_y_nm + h_nm / 2.0) / _SCALE
 
