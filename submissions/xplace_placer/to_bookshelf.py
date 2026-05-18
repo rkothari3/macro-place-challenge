@@ -221,8 +221,8 @@ def read_bookshelf_pl(pl_path: str, b: Benchmark) -> torch.Tensor:
     sizes_nm: list[int] = []
     for i in range(b.num_macros):
         if not b.macro_fixed[i].item():
-            sizes_nm.append(_nm(b.macro_sizes[i, 0].item()))
-            sizes_nm.append(_nm(b.macro_sizes[i, 1].item()))
+            sizes_nm.append(int(round(b.macro_sizes[i, 0].item() * _SCALE)))
+            sizes_nm.append(int(round(b.macro_sizes[i, 1].item() * _SCALE)))
     if sizes_nm:
         site_w_nm = sizes_nm[0]
         for s in sizes_nm[1:]:
