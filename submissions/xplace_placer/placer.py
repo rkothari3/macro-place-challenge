@@ -195,7 +195,7 @@ class XplacePlacer:
             "--custom_path",
             f"aux:{aux_path},design_name:{design},benchmark:iccad04",
             "--load_from_raw", "True",
-            "--mixed_size", "True",
+            "--mixed_size", "False",
             "--legalization", "False",
             "--detail_placement", "False",
             "--write_global_placement", "True",
@@ -208,7 +208,7 @@ class XplacePlacer:
             "--verbose_cpp_log", "False",
             "--deterministic", "True",
             "--target_density", "0.8",
-            "--num_threads", "8",
+            "--num_threads", "2",
             "--gpu", "0" if device.type == "cuda" else "-1",
         ]
 
