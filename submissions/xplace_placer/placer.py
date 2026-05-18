@@ -209,7 +209,7 @@ class XplacePlacer:
             "--deterministic", "True",
             "--target_density", "0.8",
             "--num_threads", "8",
-            "--gpu", "1" if device.type == "cuda" else "0",
+            "--gpu", "0" if device.type == "cuda" else "-1",
         ]
 
         print("[xplace_placer] Running Xplace GP...")
