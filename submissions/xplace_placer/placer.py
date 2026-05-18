@@ -75,6 +75,26 @@ def _find_xplace() -> str | None:
     return None
 
 
+def _patch_xplace_numpy2(xplace_home: str) -> None:
+    """
+    Xplace ships `np.round_(...)` in src/core/macro_legalization.py, which was
+    removed in NumPy 2.0 and crashes the detailed-placement path on Colab
+    (AttributeError: `np.round_` was removed). Rewrite it to `np.round(` in
+    place. Idempotent and best-effort — never abort the placer over this.
+    """
+    target = os.path.join(xplace_home, "src", "core", "macro_legalization.py")
+    try:
+        with open(target, "r") as f:
+            src = f.read()
+        if "np.round_(" in src:
+            with open(target, "w") as f:
+                f.write(src.replace("np.round_(", "np.round("))
+            print(f"[xplace_placer] Patched np.round_ -> np.round in {target}")
+    except OSError as e:
+        print(f"[xplace_placer] WARNING: could not patch np.round_ ({e}); "
+              "Xplace detailed placement may crash under NumPy 2.0.")
+
+
 # ---------------------------------------------------------------------------
 # Post-legalize gradient refinement (WL + congestion, Adam)
 # ---------------------------------------------------------------------------
@@ -189,6 +209,7 @@ class XplacePlacer:
             return self._fallback(b)
 
         print(f"[xplace_placer] Using Xplace at: {xplace_home}")
+        _patch_xplace_numpy2(xplace_home)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"[xplace_placer] Device: {device}")
 
@@ -244,15 +265,17 @@ class XplacePlacer:
             "--draw_placement", "False",
             "--verbose_cpp_log", "False",
             "--deterministic", "True",
-            # These all-macro benchmarks are ~80% utilization; GP overflow
-            # cannot drop below ~0.18. The 0.07 default is unreachable, so no
-            # best solution is recorded and density weight spirals to NaN; the
-            # "Large plateau -> Kill" also fires (it triggers only while
-            # overflow >= stop_overflow). Setting stop_overflow ABOVE the floor
-            # (0.25) both suppresses the kill and lets a real best solution be
-            # recorded once GP converges, then it stops gracefully via the life
-            # countdown instead of returning a bad rollback.
-            "--stop_overflow", "0.25",
+            # The "Large plateau -> Kill" fires when overflow is in
+            # [stop_overflow, 5*stop_overflow] and plateaus. GP has a transient
+            # early plateau around overflow ~0.9 (iters ~30-100) before density
+            # weight ramps up and it converges to the ~0.18 floor by ~iter 600.
+            # stop_overflow must stay LOW so 5*stop_overflow < ~0.9 excludes
+            # that early plateau (0.25 -> window [0.25,1.25] wrongly killed GP
+            # at iter 99). At 0.15 the window is [0.15,0.75]: GP runs to
+            # convergence; the late kill at the ~0.18 floor is fine (it has
+            # converged) and the recorded rollback solution is the converged
+            # spread placement that DP then legalizes.
+            "--stop_overflow", "0.15",
             "--target_density", "0.8",
             "--num_threads", "2",
             "--gpu", "0" if device.type == "cuda" else "-1",
