@@ -96,3 +96,10 @@ NETLIST_CLEANING_SUMMARY.md
 .claude/progress.md
 .claude/findings.md
 .claude/settings.local.json
+# research_repos/
+
+# Git worktrees (isolated workspaces)
+.worktrees/
+
+# Git worktrees (isolated workspaces)
+.worktrees/
