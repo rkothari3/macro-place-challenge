@@ -144,6 +144,32 @@ def _post_legalize_refine(
 
 
 # ---------------------------------------------------------------------------
+# Surrogate proxy: 1.0*WL + 0.5*Congestion + 0.5*Density (matches the real
+# proxy-cost weights). Used to rank Xplace vs the analytical fallback without
+# needing a PlacementCost object inside place().
+# ---------------------------------------------------------------------------
+
+def _surrogate_proxy(
+    pos_cpu: torch.Tensor,
+    b: Benchmark,
+    data: dict,
+    device: torch.device,
+) -> float:
+    sizes = b.macro_sizes.to(device)
+    port_pos = b.port_positions.to(device)
+    cell_centers, cell_size = _make_cell_centers(b, device)
+    with torch.no_grad():
+        pos = pos_cpu.to(device)
+        pin_xy = _compute_pin_xy(pos, data, b, port_pos)
+        wl   = _lse_hpwl_loss(pin_xy, data, b, alpha=50.0)
+        cong = _lroute_loss(pin_xy, data, b, device, pos=pos, sizes=sizes)
+        den  = _density_loss(pos, sizes, cell_centers, cell_size, b,
+                             target_density=_TARGET_DEN)
+        proxy = 1.0 * wl + 0.5 * cong + 0.5 * den
+    return float(proxy.item())
+
+
+# ---------------------------------------------------------------------------
 # Main placer class
 # ---------------------------------------------------------------------------
 
@@ -207,6 +233,11 @@ class XplacePlacer:
             "--draw_placement", "False",
             "--verbose_cpp_log", "False",
             "--deterministic", "True",
+            # IBM macro benchmarks have no real standard cells, so GP overflow
+            # plateaus around ~0.09 and never reaches the 0.07 default. Without
+            # a reachable target, no best solution is ever recorded and density
+            # weight spirals to NaN. Stop at 0.15 so a clean placement is saved.
+            "--stop_overflow", "0.15",
             "--target_density", "0.8",
             "--num_threads", "2",
             "--gpu", "0" if device.type == "cuda" else "-1",
@@ -238,6 +269,15 @@ class XplacePlacer:
         print(f"[xplace_placer] Using output: {gp_pl}")
 
         pos = read_bookshelf_pl(gp_pl, b)
+
+        # Bug 1: Xplace's GP can diverge to NaN/Inf (density weight spiral) yet
+        # still write a .pl with non-finite coords. read_bookshelf_pl copies
+        # them through silently. Detect and fall back before they poison
+        # legalization.
+        if not torch.isfinite(pos).all():
+            print("[xplace_placer] WARNING: Xplace GP produced non-finite "
+                  "coordinates (diverged) — falling back to analytical.")
+            return self._fallback(b)
         print("[xplace_placer] GP placement loaded.")
 
         # Legalize
@@ -257,6 +297,28 @@ class XplacePlacer:
         pos = _post_legalize_refine(pos, b, data, device, steps=60, cong_w=0.7)
         pos = _legalize(pos, b, time_budget_s=30.0)
 
+        if not torch.isfinite(pos).all():
+            print("[xplace_placer] WARNING: non-finite positions after "
+                  "legalize/refine — falling back to analytical.")
+            return self._fallback(b)
+
+        # Bug 2: A plateaued GP can leave nodes in poor positions so that the
+        # Xplace pipeline loses to the plain analytical placer (observed
+        # ibm01: 0.9459 vs 0.8940). Compute both and keep the better one under
+        # a surrogate that matches the real proxy weights. This makes the
+        # Xplace placer never regress below the analytical baseline.
+        print("[xplace_placer] Computing analytical fallback for comparison...")
+        pos_fb = self._fallback(b)
+
+        proxy_x = _surrogate_proxy(pos, b, data, device)
+        proxy_f = _surrogate_proxy(pos_fb, b, data, device)
+        print(f"[xplace_placer] surrogate proxy — xplace={proxy_x:.4f} "
+              f"analytical={proxy_f:.4f}")
+
+        if torch.isfinite(pos_fb).all() and proxy_f < proxy_x:
+            print("[xplace_placer] Analytical wins — returning fallback.")
+            return pos_fb
+        print("[xplace_placer] Xplace wins — returning Xplace placement.")
         return pos
 
     def _fallback(self, b: Benchmark) -> torch.Tensor:
