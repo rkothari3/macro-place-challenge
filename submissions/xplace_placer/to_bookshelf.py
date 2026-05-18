@@ -50,7 +50,10 @@ def write_bookshelf(b: Benchmark, outdir: str, design: str) -> str:
 
     # --- .nodes ---------------------------------------------------------
     nodes_path = os.path.join(outdir, f"{design}.nodes")
-    num_terminals = int(b.macro_fixed.sum().item()) + num_ports
+    # Fixed macros are physical blocks — written WITHOUT "terminal" so Xplace
+    # counts their area and treats them as fixed obstacles, not zero-area IO pins.
+    # Only actual IO ports use "terminal_NI".
+    num_terminals = num_ports  # only ports are terminals
 
     with open(nodes_path, "w") as f:
         f.write("UCLA nodes 1.0\n\n")
@@ -60,10 +63,9 @@ def write_bookshelf(b: Benchmark, outdir: str, design: str) -> str:
             w = _nm(b.macro_sizes[i, 0].item())
             h = _nm(b.macro_sizes[i, 1].item())
             name = macro_names[i]
-            suffix = "\tterminal" if b.macro_fixed[i].item() else ""
-            f.write(f"\t{name}\t{w}\t{h}{suffix}\n")
+            f.write(f"\t{name}\t{w}\t{h}\n")  # no terminal — fixed set via /FIXED in .pl
         for i in range(num_ports):
-            f.write(f"\t{port_names[i]}\t1\t1\tterminal\n")
+            f.write(f"\t{port_names[i]}\t1\t1\tterminal_NI\n")
 
     # --- .pl (bottom-left corner = center - size/2, in nm) --------------
     pl_path = os.path.join(outdir, f"{design}.pl")
@@ -160,14 +162,11 @@ def write_bookshelf(b: Benchmark, outdir: str, design: str) -> str:
     # Xplace asserts: SCL row Height == gcd(all movable node heights).
     # Movable macros (non-terminal in .nodes) are the only "standard cells" here.
     # Our nm values are multiples of 100 (0.1 µm precision × 1000), so gcd is ≥ 100.
-    movable_heights_nm = [
-        _nm(b.macro_sizes[i, 1].item())
-        for i in range(num_macros)
-        if not b.macro_fixed[i].item()
-    ]
-    if movable_heights_nm:
-        row_h_nm = movable_heights_nm[0]
-        for h in movable_heights_nm[1:]:
+    # All macros (fixed + movable) are now physical nodes — use GCD of all heights.
+    all_heights_nm = [_nm(b.macro_sizes[i, 1].item()) for i in range(num_macros)]
+    if all_heights_nm:
+        row_h_nm = all_heights_nm[0]
+        for h in all_heights_nm[1:]:
             row_h_nm = math.gcd(row_h_nm, h)
         row_h_nm = max(1, row_h_nm)
     else:
@@ -218,11 +217,11 @@ def read_bookshelf_pl(pl_path: str, b: Benchmark) -> torch.Tensor:
 
     # Compute site_width_nm = gcd of all movable node widths AND heights (nm).
     # This mirrors what Xplace's C++ parser computes internally.
+    # All macros are physical nodes now — compute GCD over all widths+heights.
     sizes_nm: list[int] = []
     for i in range(b.num_macros):
-        if not b.macro_fixed[i].item():
-            sizes_nm.append(int(round(b.macro_sizes[i, 0].item() * _SCALE)))
-            sizes_nm.append(int(round(b.macro_sizes[i, 1].item() * _SCALE)))
+        sizes_nm.append(int(round(b.macro_sizes[i, 0].item() * _SCALE)))
+        sizes_nm.append(int(round(b.macro_sizes[i, 1].item() * _SCALE)))
     if sizes_nm:
         site_w_nm = sizes_nm[0]
         for s in sizes_nm[1:]:
