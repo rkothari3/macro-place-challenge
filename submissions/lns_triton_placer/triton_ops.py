@@ -35,7 +35,7 @@ if _TRITON_AVAILABLE:
         col_left_ptr,
         # output [R, C]  (pre-zeroed, float32)
         H_demand_ptr,
-        E, C, R,
+        E, C: tl.constexpr, R: tl.constexpr,
         ch: tl.constexpr,
         cw: tl.constexpr,
         BLOCK_E: tl.constexpr,
@@ -111,7 +111,7 @@ if _TRITON_AVAILABLE:
         row_bot_ptr,
         # output [R, C]  (pre-zeroed, float32)
         V_demand_ptr,
-        E, C, R,
+        E, C: tl.constexpr, R: tl.constexpr,
         ch: tl.constexpr,
         cw: tl.constexpr,
         BLOCK_E: tl.constexpr,
