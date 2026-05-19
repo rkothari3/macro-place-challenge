@@ -75,8 +75,10 @@ from triton_ops import hv_demand_triton, _TRITON_AVAILABLE  # type: ignore  (sam
 # IBM ICCAD04 benchmark root (same as evaluate.py)
 _ICCAD_ROOT = _PROJECT_ROOT / "external" / "MacroPlacement" / "Testcases" / "ICCAD04"
 
-# Log Triton availability once at import time
-_backend = "Triton" if _TRITON_AVAILABLE else "PyTorch-fallback"
+# Log actual runtime backend: Triton kernel only fires when both triton is
+# importable AND tensors are on CUDA; otherwise falls back to PyTorch scatter.
+_backend = ("Triton" if (_TRITON_AVAILABLE and torch.cuda.is_available())
+            else "PyTorch-fallback")
 print(f"[lns_triton_placer] congestion backend: {_backend}")
 
 # ---------------------------------------------------------------------------
@@ -329,8 +331,9 @@ def _gradient_refine_subset(
     All other macros are fixed. Uses Triton-accelerated lroute.
     Returns best-by-loss candidate positions [N, 2] on CPU.
 
-    L-BFGS converges in ~15-25 quasi-Newton steps vs ~50 Adam steps,
-    so we get 2-3× more LNS iterations per time budget for equal quality.
+    `steps` is passed as max_iter to L-BFGS. L-BFGS with strong Wolfe
+    converges in ~15-25 quasi-Newton steps where Adam needs ~50, giving
+    2-3x more LNS iterations per time budget for equal inner-loop quality.
     """
     sizes    = b.macro_sizes.to(device)
     port_pos = b.port_positions.to(device)
@@ -412,8 +415,8 @@ def lns_refine(
 
     Each iteration:
       1. Score macros by congestion footprint → select K-neighborhood
-      2. Gradient descent on subset → legalize → true proxy eval
-      3. Accept if proxy improves
+      2. L-BFGS on subset → legalize → overlap guard → true proxy eval
+      3. Accept if proxy improves (strict descent)
     """
     movable_mask = b.get_movable_mask()
     movable_idx  = movable_mask.nonzero(as_tuple=True)[0]
@@ -427,10 +430,11 @@ def lns_refine(
 
     cong_w = 0.6   # aggressive congestion targeting in LNS inner loop
 
-    t_start   = time.time()
-    no_imp    = 0
-    iteration = 0
-    scores    = None   # cached per-macro congestion scores; invalidated on improvement
+    t_start        = time.time()
+    no_imp         = 0
+    iteration      = 0
+    ovl_rejected   = 0   # iterations skipped by overlap guard
+    scores         = None   # cached per-macro congestion scores; invalidated on improvement
 
     while True:
         elapsed = time.time() - t_start
@@ -465,6 +469,7 @@ def lns_refine(
             _ovl = macro_overlap_loss(_cand_gpu, _sizes_gpu, b.num_hard_macros, gap=0.0)
         if _ovl.item() > 1e-6:
             no_imp += 1
+            ovl_rejected += 1
             iteration += 1
             continue
 
@@ -487,7 +492,7 @@ def lns_refine(
     elapsed = time.time() - t_start
     iters_per_s = iteration / elapsed if elapsed > 0 else 0
     print(f"[lns] Done: {iteration} iterations in {elapsed:.1f}s  "
-          f"({iters_per_s:.2f} iter/s)  best_proxy={best_proxy:.4f}")
+          f"({iters_per_s:.2f} iter/s)  ovl_rejected={ovl_rejected}  best_proxy={best_proxy:.4f}")
     return best_pos
 
 
