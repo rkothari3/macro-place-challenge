@@ -321,19 +321,20 @@ def _gradient_refine_subset(
     b: Benchmark,
     data: dict,
     device: torch.device,
-    steps: int = 30,
+    steps: int = 50,
     cong_w: float = 0.6,
     ovl_w: float = 5.0,
     den_w: float = 0.4,
+    lr: float = 0.01,
 ) -> torch.Tensor:
     """
-    Optimize `subset` macros with L-BFGS (strong Wolfe line search).
+    Run Adam gradient descent on `subset` macros for `steps` steps.
     All other macros are fixed. Uses Triton-accelerated lroute.
     Returns best-by-loss candidate positions [N, 2] on CPU.
 
-    `steps` is passed as max_iter to L-BFGS. L-BFGS with strong Wolfe
-    converges in ~15-25 quasi-Newton steps where Adam needs ~50, giving
-    2-3x more LNS iterations per time budget for equal inner-loop quality.
+    Small lr keeps each candidate close to the current best, which is
+    critical for LNS acceptance rate: large moves look good in the
+    surrogate but are rejected by the true proxy oracle.
     """
     sizes    = b.macro_sizes.to(device)
     port_pos = b.port_positions.to(device)
@@ -344,20 +345,12 @@ def _gradient_refine_subset(
 
     pos_base = pos_cpu.clone().to(device)
     pos_sub  = pos_base[subset].detach().requires_grad_(True)
-
-    optimizer = torch.optim.LBFGS(
-        [pos_sub],
-        lr=1.0,
-        max_iter=steps,
-        history_size=min(steps, 10),
-        line_search_fn="strong_wolfe",
-    )
+    optimizer = torch.optim.Adam([pos_sub], lr=lr)
 
     best_loss = float("inf")
     best_sub  = pos_sub.detach().clone()
 
-    def closure():
-        nonlocal best_loss, best_sub
+    for _ in range(steps):
         optimizer.zero_grad()
 
         p = pos_base.detach().clone()
@@ -375,21 +368,17 @@ def _gradient_refine_subset(
         loss = wl + cong_w * cong + den_w * den + ovl_w * ovl
         loss.backward()
 
+        optimizer.step()
+
+        with torch.no_grad():
+            pos_sub[:, 0].clamp_(half_w[subset], cw - half_w[subset])
+            pos_sub[:, 1].clamp_(half_h[subset], ch - half_h[subset])
+
         l = loss.item()
         if l < best_loss:
             best_loss = l
             best_sub  = pos_sub.detach().clone()
 
-        return loss
-
-    optimizer.step(closure)
-
-    # Project back to feasible region after L-BFGS (line search may overshoot bounds)
-    with torch.no_grad():
-        best_sub[:, 0].clamp_(half_w[subset], cw - half_w[subset])
-        best_sub[:, 1].clamp_(half_h[subset], ch - half_h[subset])
-
-    # Reconstruct full position tensor
     result = pos_base.detach().clone()
     result[subset] = best_sub
     return result.cpu()
@@ -407,7 +396,7 @@ def lns_refine(
     device: torch.device,
     time_budget: float = 1500.0,
     k_neighborhood: int = 20,
-    inner_steps: int = 30,
+    inner_steps: int = 50,
     no_improve_limit: int = 50,
 ) -> torch.Tensor:
     """
@@ -415,7 +404,7 @@ def lns_refine(
 
     Each iteration:
       1. Score macros by congestion footprint → select K-neighborhood
-      2. L-BFGS on subset → legalize → overlap guard → true proxy eval
+      2. Adam gradient descent on subset → legalize → overlap guard → true proxy eval
       3. Accept if proxy improves (strict descent)
     """
     movable_mask = b.get_movable_mask()
@@ -541,7 +530,7 @@ class LNSTritonPlacer:
             warm_pos, b, plc, data, device,
             time_budget=lns_budget,
             k_neighborhood=20,
-            inner_steps=30,
+            inner_steps=50,
             no_improve_limit=50,
         )
 
