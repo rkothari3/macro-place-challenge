@@ -70,10 +70,14 @@ from macro_place.loader import load_benchmark_from_dir
 from macro_place.objective import compute_proxy_cost, _set_placement
 
 # Local Triton-accelerated congestion
-from triton_ops import hv_demand_triton  # type: ignore  (same dir)
+from triton_ops import hv_demand_triton, _TRITON_AVAILABLE  # type: ignore  (same dir)
 
 # IBM ICCAD04 benchmark root (same as evaluate.py)
 _ICCAD_ROOT = _PROJECT_ROOT / "external" / "MacroPlacement" / "Testcases" / "ICCAD04"
+
+# Log Triton availability once at import time
+_backend = "Triton" if _TRITON_AVAILABLE else "PyTorch-fallback"
+print(f"[lns_triton_placer] congestion backend: {_backend}")
 
 # ---------------------------------------------------------------------------
 # Oracle helpers
@@ -413,9 +417,10 @@ def lns_refine(
 
     cong_w = 0.6   # aggressive congestion targeting in LNS inner loop
 
-    t_start  = time.time()
-    no_imp   = 0
+    t_start   = time.time()
+    no_imp    = 0
     iteration = 0
+    scores    = None   # cached per-macro congestion scores; invalidated on improvement
 
     while True:
         elapsed = time.time() - t_start
@@ -425,8 +430,9 @@ def lns_refine(
             print(f"[lns] Early stop: {no_improve_limit} consecutive non-improving iterations")
             break
 
-        # Score macros by congestion contribution
-        scores = _score_macro_congestion(best_pos, b, data, device)
+        # Score macros by congestion — reuse cached scores if best_pos hasn't changed
+        if scores is None:
+            scores = _score_macro_congestion(best_pos, b, data, device)
 
         # Select neighborhood
         subset = _select_neighborhood(scores, movable_idx, k=k_neighborhood)
@@ -437,14 +443,14 @@ def lns_refine(
             steps=inner_steps, cong_w=cong_w,
         )
 
-        # Legalize — 400 passes matches the analytical placer; fewer leaves residual
-        # overlaps on dense benchmarks which inflate density in the oracle unfairly.
-        candidate = _legalize(candidate, b, time_budget_s=15.0, max_passes=400)
+        # Legalize — LNS candidates start from already-legal best_pos with only K=20
+        # macros displaced, so 100 passes is sufficient to clear residual overlaps.
+        # (Initial warm start uses 400 passes; reducing here saves ~0.35s/iteration.)
+        candidate = _legalize(candidate, b, time_budget_s=5.0, max_passes=100)
 
         # Quick overlap guard: skip oracle call if hard macros still overlap.
-        # macro_overlap_loss > 0 → overlapping pairs exist → reject cheaply.
         with torch.no_grad():
-            _cand_gpu = candidate.to(device)
+            _cand_gpu  = candidate.to(device)
             _sizes_gpu = b.macro_sizes.to(device)
             _ovl = macro_overlap_loss(_cand_gpu, _sizes_gpu, b.num_hard_macros, gap=0.0)
         if _ovl.item() > 1e-6:
@@ -460,6 +466,7 @@ def lns_refine(
             best_proxy  = proxy
             best_pos    = candidate.clone()
             no_imp      = 0
+            scores      = None   # invalidate: best_pos changed
             print(f"[lns] iter {iteration:4d}  proxy={proxy:.4f}  Δ={improvement:+.4f}  "
                   f"t={elapsed:.0f}s  subset_size={len(subset)}")
         else:
@@ -468,7 +475,9 @@ def lns_refine(
         iteration += 1
 
     elapsed = time.time() - t_start
-    print(f"[lns] Done: {iteration} iterations in {elapsed:.1f}s  best_proxy={best_proxy:.4f}")
+    iters_per_s = iteration / elapsed if elapsed > 0 else 0
+    print(f"[lns] Done: {iteration} iterations in {elapsed:.1f}s  "
+          f"({iters_per_s:.2f} iter/s)  best_proxy={best_proxy:.4f}")
     return best_pos
 
 
