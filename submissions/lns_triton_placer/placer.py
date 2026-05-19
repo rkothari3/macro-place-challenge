@@ -449,7 +449,7 @@ def lns_refine(
         # Legalize — LNS candidates start from already-legal best_pos with only K=20
         # macros displaced, so 100 passes is sufficient to clear residual overlaps.
         # (Initial warm start uses 400 passes; reducing here saves ~0.35s/iteration.)
-        candidate = _legalize(candidate, b, time_budget_s=5.0, max_passes=100)
+        candidate = _legalize(candidate, b, time_budget_s=5.0, max_passes=100, verbose=False)
 
         # Quick overlap guard: skip oracle call if hard macros still overlap.
         with torch.no_grad():

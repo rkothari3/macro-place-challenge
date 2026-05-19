@@ -577,6 +577,7 @@ def _legalize(
     b: Benchmark,
     time_budget_s: float = 20.0,
     max_passes: int = 400,
+    verbose: bool = True,
 ) -> torch.Tensor:
     """
     Vectorized hard-macro legalization (damped-Jacobi pairwise separation).
@@ -663,11 +664,12 @@ def _legalize(
         X[:, 1].clamp_(min=hh, max=ch - hh)
 
     elapsed = time.time() - t0
-    if converged:
-        print(f"  [legalize] vectorized: converged, {passes} passes ({elapsed:.2f}s)")
-    else:
-        print(f"  [legalize] vectorized: {passes} passes ({elapsed:.2f}s), "
-              f"{final_overlaps} residual overlap pairs (refine handles)")
+    if verbose:
+        if converged:
+            print(f"  [legalize] vectorized: converged, {passes} passes ({elapsed:.2f}s)")
+        else:
+            print(f"  [legalize] vectorized: {passes} passes ({elapsed:.2f}s), "
+                  f"{final_overlaps} residual overlap pairs (refine handles)")
 
     out = pos.clone()
     out[:num_hard] = X.to(pos.dtype).to(pos.device)
