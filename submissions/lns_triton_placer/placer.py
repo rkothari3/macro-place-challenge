@@ -501,24 +501,35 @@ class LNSTritonPlacer:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"[lns_triton_placer] device={device}")
 
-        # ---- Phase 0: analytical warm start ----
-        t0 = time.time()
-        print("[lns_triton_placer] Phase 0: Analytical warm start...")
-        analytical = AnalyticalPlacer()
-        warm_pos   = analytical.place(b)   # [N, 2] on CPU
-        t_analytical = time.time() - t0
-        print(f"[lns_triton_placer] Warm start done in {t_analytical:.1f}s")
-
         # Preprocess (needed for LNS inner loop + scoring)
         data = _preprocess(b, device)
 
-        # Load oracle plc
+        # Load oracle plc (needed for warm-start selection too)
         print(f"[lns_triton_placer] Loading plc oracle for {b.name}...")
         try:
             plc = _load_plc(b)
         except Exception as e:
             print(f"[lns_triton_placer] WARNING: Could not load plc ({e}), skipping LNS")
-            return warm_pos
+            return AnalyticalPlacer().place(b)
+
+        # ---- Phase 0: best-of-3 analytical warm starts ----
+        # The analytical placer uses random initialization, so proxy varies
+        # by ~0.02 across runs. Running 3 times and keeping the best costs
+        # ~21s on T4 but can save hundreds of LNS iterations.
+        t0 = time.time()
+        WARM_RESTARTS = 3
+        print(f"[lns_triton_placer] Phase 0: {WARM_RESTARTS}× analytical warm start (best-of)...")
+        warm_pos      = None
+        warm_proxy    = float("inf")
+        for i in range(WARM_RESTARTS):
+            pos   = AnalyticalPlacer().place(b)
+            proxy = _true_proxy(pos, b, plc)
+            print(f"[lns_triton_placer] Warm start {i+1}/{WARM_RESTARTS}: proxy={proxy:.4f}")
+            if proxy < warm_proxy:
+                warm_proxy = proxy
+                warm_pos   = pos
+        t_analytical = time.time() - t0
+        print(f"[lns_triton_placer] Best warm start: proxy={warm_proxy:.4f}  ({t_analytical:.1f}s)")
 
         # ---- Phase 1: LNS refinement ----
         # Reserve 300s for warm start overhead + 120s buffer; rest is LNS budget
