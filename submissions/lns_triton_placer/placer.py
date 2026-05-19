@@ -437,8 +437,20 @@ def lns_refine(
             steps=inner_steps, cong_w=cong_w,
         )
 
-        # Legalize
-        candidate = _legalize(candidate, b, time_budget_s=10.0, max_passes=200)
+        # Legalize — 400 passes matches the analytical placer; fewer leaves residual
+        # overlaps on dense benchmarks which inflate density in the oracle unfairly.
+        candidate = _legalize(candidate, b, time_budget_s=15.0, max_passes=400)
+
+        # Quick overlap guard: skip oracle call if hard macros still overlap.
+        # macro_overlap_loss > 0 → overlapping pairs exist → reject cheaply.
+        with torch.no_grad():
+            _cand_gpu = candidate.to(device)
+            _sizes_gpu = b.macro_sizes.to(device)
+            _ovl = macro_overlap_loss(_cand_gpu, _sizes_gpu, b.num_hard_macros, gap=0.0)
+        if _ovl.item() > 1e-6:
+            no_imp += 1
+            iteration += 1
+            continue
 
         # True proxy evaluation
         proxy = _true_proxy(candidate, b, plc)
