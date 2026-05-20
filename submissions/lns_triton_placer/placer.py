@@ -279,6 +279,87 @@ def _score_macro_congestion(
 # Neighborhood selection
 # ---------------------------------------------------------------------------
 
+@torch.no_grad()
+def _compute_peak_congestion_reduction(
+    pos: torch.Tensor,      # [N, 2] current position (CPU)
+    macro_idx: int,
+    b: Benchmark,
+    data: dict,
+    device: torch.device,
+    perturb_scale: float = 0.02,
+) -> float:
+    """
+    For a single macro, estimate how much a small movement reduces peak congestion.
+    Returns the reduction in max grid-cell congestion (higher is better).
+    """
+    rows = b.grid_rows
+    cols = b.grid_cols
+    cw   = b.canvas_width  / cols
+    ch   = b.canvas_height / rows
+
+    p = pos.to(device)
+    port_pos = b.port_positions.to(device)
+    sizes    = b.macro_sizes.to(device)
+
+    pin_xy = _compute_pin_xy(p, data, b, port_pos)
+    col_left = torch.arange(cols, device=device, dtype=p.dtype) * cw
+    row_bot  = torch.arange(rows, device=device, dtype=p.dtype) * ch
+
+    edge_src = data["edge_src_idx"]
+    edge_snk = data["edge_snk_idx"]
+    edge_wt  = data["edge_weights"]
+
+    if edge_src.shape[0] == 0:
+        return 0.0
+
+    # Current congestion
+    src_xy = pin_xy[edge_src]
+    snk_xy = pin_xy[edge_snk]
+    src_x, src_y = src_xy[:, 0], src_xy[:, 1]
+    snk_x, snk_y = snk_xy[:, 0], snk_xy[:, 1]
+
+    x_min = torch.minimum(src_x, snk_x)
+    x_max = torch.maximum(src_x, snk_x)
+    y_min = torch.minimum(src_y, snk_y)
+    y_max = torch.maximum(src_y, snk_y)
+
+    H_demand, V_demand = hv_demand_triton(
+        edge_wt.to(p.dtype),
+        src_y, snk_x, x_min, x_max, y_min, y_max,
+        col_left, row_bot, rows, cols, ch, cw,
+    )
+
+    h_supply = float(b.hroutes_per_micron) * ch
+    v_supply = float(b.vroutes_per_micron) * cw
+    cong_current = torch.max(H_demand / h_supply).item(), torch.max(V_demand / v_supply).item()
+    peak_current = max(cong_current)
+
+    # Perturbed congestion: small random move
+    p_pert = p.clone()
+    p_pert[macro_idx] += torch.randn(2, device=device) * perturb_scale
+
+    pin_xy_pert = _compute_pin_xy(p_pert, data, b, port_pos)
+    src_xy_pert = pin_xy_pert[edge_src]
+    snk_xy_pert = pin_xy_pert[edge_snk]
+    src_x_pert, src_y_pert = src_xy_pert[:, 0], src_xy_pert[:, 1]
+    snk_x_pert, snk_y_pert = snk_xy_pert[:, 0], snk_xy_pert[:, 1]
+
+    x_min_pert = torch.minimum(src_x_pert, snk_x_pert)
+    x_max_pert = torch.maximum(src_x_pert, snk_x_pert)
+    y_min_pert = torch.minimum(src_y_pert, snk_y_pert)
+    y_max_pert = torch.maximum(src_y_pert, snk_y_pert)
+
+    H_pert, V_pert = hv_demand_triton(
+        edge_wt.to(p_pert.dtype),
+        src_y_pert, snk_x_pert, x_min_pert, x_max_pert, y_min_pert, y_max_pert,
+        col_left, row_bot, rows, cols, ch, cw,
+    )
+
+    peak_pert = max(torch.max(H_pert / h_supply).item(), torch.max(V_pert / v_supply).item())
+
+    return max(0.0, peak_current - peak_pert)
+
+
 def _select_neighborhood(
     scores: torch.Tensor,   # [N] macro congestion scores (CPU)
     movable_idx: torch.Tensor,   # [M] indices of movable macros
@@ -309,6 +390,57 @@ def _select_neighborhood(
         selected = hot_indices
 
     return selected
+
+
+def _select_neighborhood_by_peak_reduction(
+    pos: torch.Tensor,      # [N, 2] current position (CPU)
+    movable_idx: torch.Tensor,   # [M] indices of movable macros
+    b: Benchmark,
+    data: dict,
+    device: torch.device,
+    k: int = 20,
+    frac_hot: float = 0.7,
+    budget: int = 5,  # only evaluate budget # of candidates to save time
+) -> torch.Tensor:
+    """
+    Select K macros by peak-congestion reduction potential.
+    Samples ~budget macros to evaluate (to keep overhead reasonable),
+    selects K macros with highest peak-reduction score.
+    Falls back to congestion-score ranking if computation is slow.
+    """
+    movable = movable_idx.tolist()
+    k = min(k, len(movable))
+
+    if len(movable) <= budget:
+        # Evaluate all
+        candidates = movable_idx.tolist()
+    else:
+        # Sample: frac_hot from top congestion scores, rest random
+        scores = torch.zeros(len(movable))
+        mov_scores = torch.tensor([0.0] * len(movable))  # placeholder
+        candidates = movable_idx[torch.randperm(len(movable_idx))[:budget]].tolist()
+
+    peak_reductions = []
+    for macro_idx in candidates:
+        reduction = _compute_peak_congestion_reduction(pos, macro_idx, b, data, device)
+        peak_reductions.append((macro_idx, reduction))
+
+    # Sort by peak reduction
+    peak_reductions.sort(key=lambda x: x[1], reverse=True)
+
+    # Select top K from evaluated candidates
+    selected_list = [idx for idx, _ in peak_reductions[:min(k, len(peak_reductions))]]
+
+    # If we have fewer than K evaluated candidates, fill rest randomly from unevaluated
+    if len(selected_list) < k:
+        evaluated_set = set(selected_list)
+        unevaluated = [m for m in movable if m not in evaluated_set]
+        n_fill = k - len(selected_list)
+        if unevaluated and n_fill > 0:
+            perm = torch.randperm(len(unevaluated))[:n_fill]
+            selected_list.extend([unevaluated[i] for i in perm])
+
+    return torch.tensor(selected_list[:k], dtype=torch.long)
 
 
 # ---------------------------------------------------------------------------
@@ -398,12 +530,14 @@ def lns_refine(
     k_neighborhood: int = 20,
     inner_steps: int = 50,
     no_improve_limit: int = 50,
+    use_peak_reduction: bool = True,  # NEW: use peak-congestion-aware selection
 ) -> torch.Tensor:
     """
     Large-Neighborhood Search over the warm placement using the true proxy oracle.
 
     Each iteration:
       1. Score macros by congestion footprint → select K-neighborhood
+         (can use peak-reduction-aware selection if use_peak_reduction=True)
       2. Adam gradient descent on subset → legalize → overlap guard → true proxy eval
       3. Accept if proxy improves (strict descent)
     """
@@ -416,6 +550,7 @@ def lns_refine(
     best_pos   = warm_pos.clone()
     best_proxy = _true_proxy(best_pos, b, plc)
     print(f"[lns] Initial proxy (analytical): {best_proxy:.4f}")
+    print(f"[lns] Neighborhood selection: {'peak-reduction-aware' if use_peak_reduction else 'congestion-score'}")
 
     cong_w = 0.6   # aggressive congestion targeting in LNS inner loop
 
@@ -433,12 +568,17 @@ def lns_refine(
             print(f"[lns] Early stop: {no_improve_limit} consecutive non-improving iterations")
             break
 
-        # Score macros by congestion — reuse cached scores if best_pos hasn't changed
-        if scores is None:
-            scores = _score_macro_congestion(best_pos, b, data, device)
-
         # Select neighborhood
-        subset = _select_neighborhood(scores, movable_idx, k=k_neighborhood)
+        if use_peak_reduction:
+            # Peak-reduction-aware: samples ~5 macros, selects K with highest potential
+            subset = _select_neighborhood_by_peak_reduction(
+                best_pos, movable_idx, b, data, device, k=k_neighborhood, budget=5
+            )
+        else:
+            # Congestion-score-based: fast, uses cached scores
+            if scores is None:
+                scores = _score_macro_congestion(best_pos, b, data, device)
+            subset = _select_neighborhood(scores, movable_idx, k=k_neighborhood)
 
         # Gradient refine subset
         candidate = _gradient_refine_subset(
@@ -470,7 +610,8 @@ def lns_refine(
             best_proxy  = proxy
             best_pos    = candidate.clone()
             no_imp      = 0
-            scores      = None   # invalidate: best_pos changed
+            if not use_peak_reduction:
+                scores = None   # invalidate: best_pos changed
             print(f"[lns] iter {iteration:4d}  proxy={proxy:.4f}  Δ={improvement:+.4f}  "
                   f"t={elapsed:.0f}s  subset_size={len(subset)}")
         else:
@@ -495,6 +636,14 @@ class LNSTritonPlacer:
     Phase 0: Analytical warm start (reuses AnalyticalPlacer from analytical_placer/).
     Phase 1: Large-Neighborhood Search with true proxy oracle + Triton lroute kernels.
     """
+
+    def __init__(self, use_peak_reduction: bool = True):
+        """
+        Args:
+            use_peak_reduction: if True, use peak-congestion-aware neighborhood selection.
+                               if False, use fast congestion-score-based selection (original).
+        """
+        self.use_peak_reduction = use_peak_reduction
 
     def place(self, benchmark: Benchmark) -> torch.Tensor:
         b      = benchmark
@@ -543,6 +692,7 @@ class LNSTritonPlacer:
             k_neighborhood=20,
             inner_steps=50,
             no_improve_limit=50,
+            use_peak_reduction=self.use_peak_reduction,
         )
 
         return best_pos

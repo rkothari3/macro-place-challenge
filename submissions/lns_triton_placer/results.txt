@@ -1,0 +1,957 @@
+----------------------------------------------------------------------------------
+ Benchmark     Proxy        WL   Density      Cong  Overlaps   Runtime  vs RePlAce
+----------------------------------------------------------------------------------
+#[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm01/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 45, Row: 41
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] device=cuda
+[lns_triton_placer] Phase 0: Analytical warm start...
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=86.5032  wl=0.3992  den=0.051968  alpha=10.0
+  [r0] step  50  loss=1.7283  wl=0.4230  den=0.001873  alpha=13.3
+  [restart 0] cong_100=1.2287 → cong_w=0.110  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=1779.5519  wl=0.4523  den=0.197368  alpha=10.0
+  [r1] step  50  loss=45.9599  wl=0.4684  den=0.006428  alpha=13.3
+  [restart 1] cong_100=2.0112 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.110, cong_100=1.23)...
+  step  100  loss=1.1910  wl=0.4356  den=0.001795  cong=1.2287  den_w=0.50  cong_w=0.11  alpha=16.7
+  step  150  loss=0.7022  wl=0.4430  den=0.006727  cong=0.9788  den_w=0.50  cong_w=0.11  alpha=20.0
+  step  200  loss=0.6744  wl=0.4478  den=0.008506  cong=0.9604  den_w=0.50  cong_w=0.11  alpha=23.3
+  step  250  loss=0.5910  wl=0.4518  den=0.004826  cong=0.9526  den_w=0.50  cong_w=0.11  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] vectorized: 400 passes (0.66s), 3 residual overlap pairs (refine handles)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.42, cong_100=1.23)...
+[lns_triton_placer] Warm start done in 6.9s
+[lns_triton_placer] Loading plc oracle for ibm01...
+#[INFO] Reading from /content/macro-place-challenge/external/MacroPlacement/Testcases/ICCAD04/ibm01/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 45, Row: 41
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] Phase 1: LNS (budget=293s, K=20, steps=50)...
+[lns] Initial proxy (analytical): 0.8759
+  [legalize] vectorized: 400 passes (0.65s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.64s), 1 residual overlap pairs (refine handles)
+[lns] iter    2  proxy=0.8758  Δ=+0.0001  t=9s  subset_size=20
+  [legalize] vectorized: 400 passes (0.66s), 1 residual overlap pairs (refine handles)
+[lns] iter    3  proxy=0.8750  Δ=+0.0008  t=12s  subset_size=20
+  [legalize] vectorized: 400 passes (0.64s), 1 residual overlap pairs (refine handles)
+[lns] iter    4  proxy=0.8749  Δ=+0.0001  t=17s  subset_size=20
+  [legalize] vectorized: 400 passes (0.64s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.62s), 1 residual overlap pairs (refine handles)
+[lns] iter    6  proxy=0.8749  Δ=+0.0000  t=25s  subset_size=20
+  [legalize] vectorized: 400 passes (0.64s), 1 residual overlap pairs (refine handles)
+[lns] iter    7  proxy=0.8745  Δ=+0.0004  t=30s  subset_size=20
+  [legalize] vectorized: 400 passes (0.65s), 1 residual overlap pairs (refine handles)
+[lns] iter    8  proxy=0.8744  Δ=+0.0001  t=34s  subset_size=20
+  [legalize] vectorized: 400 passes (0.63s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.64s), 1 residual overlap pairs (refine handles)
+[lns] iter   10  proxy=0.8743  Δ=+0.0001  t=42s  subset_size=20
+  [legalize] vectorized: 400 passes (0.61s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.61s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 1 residual overlap pairs (refine handles)
+[lns] iter   14  proxy=0.8742  Δ=+0.0001  t=59s  subset_size=20
+  [legalize] vectorized: 400 passes (0.62s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.62s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 1 residual overlap pairs (refine handles)
+[lns] iter   17  proxy=0.8742  Δ=+0.0000  t=71s  subset_size=20
+  [legalize] vectorized: 400 passes (0.64s), 1 residual overlap pairs (refine handles)
+[lns] iter   18  proxy=0.8742  Δ=+0.0000  t=75s  subset_size=20
+  [legalize] vectorized: 400 passes (0.64s), 2 residual overlap pairs (refine handles)
+[lns] iter   19  proxy=0.8741  Δ=+0.0001  t=79s  subset_size=20
+  [legalize] vectorized: 400 passes (0.61s), 2 residual overlap pairs (refine handles)
+[lns] iter   20  proxy=0.8740  Δ=+0.0001  t=83s  subset_size=20
+  [legalize] vectorized: 400 passes (0.62s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.93s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.66s), 2 residual overlap pairs (refine handles)
+[lns] iter   23  proxy=0.8739  Δ=+0.0001  t=95s  subset_size=20
+  [legalize] vectorized: 400 passes (0.61s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.96s), 3 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.61s), 2 residual overlap pairs (refine handles)
+[lns] iter   27  proxy=0.8739  Δ=+0.0000  t=111s  subset_size=20
+  [legalize] vectorized: 400 passes (0.62s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.65s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.64s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.62s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.61s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.65s), 2 residual overlap pairs (refine handles)
+[lns] iter   34  proxy=0.8739  Δ=+0.0000  t=138s  subset_size=20
+  [legalize] vectorized: 400 passes (0.63s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.62s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.64s), 3 residual overlap pairs (refine handles)
+[lns] iter   37  proxy=0.8738  Δ=+0.0000  t=150s  subset_size=20
+  [legalize] vectorized: 400 passes (0.94s), 3 residual overlap pairs (refine handles)
+[lns] iter   38  proxy=0.8737  Δ=+0.0001  t=154s  subset_size=20
+  [legalize] vectorized: 400 passes (0.63s), 4 residual overlap pairs (refine handles)
+[lns] iter   39  proxy=0.8737  Δ=+0.0000  t=159s  subset_size=20
+  [legalize] vectorized: 400 passes (0.65s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.91s), 4 residual overlap pairs (refine handles)
+[lns] iter   41  proxy=0.8737  Δ=+0.0000  t=166s  subset_size=20
+  [legalize] vectorized: 400 passes (0.64s), 4 residual overlap pairs (refine handles)
+[lns] iter   42  proxy=0.8736  Δ=+0.0001  t=171s  subset_size=20
+  [legalize] vectorized: 400 passes (0.62s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.70s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.60s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.65s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 4 residual overlap pairs (refine handles)
+[lns] iter   49  proxy=0.8735  Δ=+0.0000  t=198s  subset_size=20
+  [legalize] vectorized: 400 passes (0.62s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.62s), 4 residual overlap pairs (refine handles)
+[lns] iter   51  proxy=0.8734  Δ=+0.0001  t=207s  subset_size=20
+  [legalize] vectorized: 400 passes (0.62s), 4 residual overlap pairs (refine handles)
+[lns] iter   52  proxy=0.8733  Δ=+0.0001  t=210s  subset_size=20
+  [legalize] vectorized: 400 passes (0.63s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.83s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 4 residual overlap pairs (refine handles)
+[lns] iter   55  proxy=0.8732  Δ=+0.0001  t=222s  subset_size=20
+  [legalize] vectorized: 400 passes (0.65s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.91s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.62s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.79s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.62s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 4 residual overlap pairs (refine handles)
+[lns] iter   63  proxy=0.8728  Δ=+0.0004  t=253s  subset_size=20
+  [legalize] vectorized: 400 passes (0.63s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.60s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.61s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 4 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.62s), 5 residual overlap pairs (refine handles)
+[lns] iter   69  proxy=0.8726  Δ=+0.0001  t=277s  subset_size=20
+  [legalize] vectorized: 400 passes (0.69s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.61s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.63s), 5 residual overlap pairs (refine handles)
+[lns] iter   72  proxy=0.8726  Δ=+0.0000  t=289s  subset_size=20
+  [legalize] vectorized: 400 passes (0.95s), 5 residual overlap pairs (refine handles)
+[lns] Done: 74 iterations in 297.4s  best_proxy=0.8726
+     ibm01    0.8726    0.0716    0.6260    0.9759         0     311.6s      +12.5%
+#[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm02/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 30, Row: 27
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] device=cuda
+[lns_triton_placer] Phase 0: Analytical warm start...
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=95.2039  wl=0.3467  den=0.028595  alpha=10.0
+  [r0] step  50  loss=1.5926  wl=0.3540  den=0.001137  alpha=13.3
+  [restart 0] cong_100=2.5566 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=3201.3210  wl=0.4076  den=0.148444  alpha=10.0
+  [r1] step  50  loss=313.2477  wl=0.3947  den=0.052653  alpha=13.3
+  [restart 1] cong_100=3.5807 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=2.56)...
+  step  100  loss=2.1241  wl=0.3586  den=0.001160  cong=2.5566  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=1.5031  wl=0.3652  den=0.030495  cong=1.7977  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=0.9630  wl=0.3691  den=0.033474  cong=1.7219  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.8993  wl=0.3720  den=0.037046  cong=1.6958  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] vectorized: converged, 1 passes (0.00s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=2.56)...
+[lns_triton_placer] Warm start done in 6.5s
+[lns_triton_placer] Loading plc oracle for ibm02...
+#[INFO] Reading from /content/macro-place-challenge/external/MacroPlacement/Testcases/ICCAD04/ibm02/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 30, Row: 27
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] Phase 1: LNS (budget=293s, K=20, steps=50)...
+[lns] Initial proxy (analytical): 1.3018
+  [legalize] vectorized: 400 passes (0.75s), 3 residual overlap pairs (refine handles)
+[lns] iter    0  proxy=1.3011  Δ=+0.0007  t=0s  subset_size=20
+  [legalize] vectorized: 400 passes (0.74s), 2 residual overlap pairs (refine handles)
+[lns] iter    1  proxy=1.3010  Δ=+0.0001  t=9s  subset_size=20
+  [legalize] vectorized: 400 passes (0.71s), 2 residual overlap pairs (refine handles)
+[lns] iter    2  proxy=1.3010  Δ=+0.0001  t=18s  subset_size=20
+  [legalize] vectorized: 400 passes (1.00s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.72s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.73s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.08s), 2 residual overlap pairs (refine handles)
+[lns] iter    6  proxy=1.3009  Δ=+0.0001  t=52s  subset_size=20
+  [legalize] vectorized: 400 passes (0.74s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.72s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.05s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.74s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.73s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.07s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.74s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.72s), 2 residual overlap pairs (refine handles)
+[lns] iter   14  proxy=1.3008  Δ=+0.0001  t=121s  subset_size=20
+  [legalize] vectorized: 400 passes (1.08s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.73s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.75s), 2 residual overlap pairs (refine handles)
+[lns] iter   17  proxy=1.3007  Δ=+0.0001  t=146s  subset_size=20
+  [legalize] vectorized: 400 passes (1.01s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.72s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.72s), 2 residual overlap pairs (refine handles)
+[lns] iter   20  proxy=1.3006  Δ=+0.0001  t=171s  subset_size=20
+  [legalize] vectorized: 400 passes (0.95s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.74s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.72s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.71s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.72s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.73s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.76s), 2 residual overlap pairs (refine handles)
+[lns] iter   27  proxy=1.3000  Δ=+0.0005  t=231s  subset_size=20
+  [legalize] vectorized: 400 passes (0.74s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.75s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.72s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.72s), 2 residual overlap pairs (refine handles)
+[lns] iter   31  proxy=1.3000  Δ=+0.0000  t=265s  subset_size=20
+  [legalize] vectorized: 400 passes (0.75s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.86s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.03s), 2 residual overlap pairs (refine handles)
+[lns] iter   34  proxy=1.3000  Δ=+0.0000  t=291s  subset_size=20
+[lns] Done: 35 iterations in 300.4s  best_proxy=1.3000
+     ibm02    1.3000    0.0838    0.7393    1.6932         0     324.5s      +29.2%
+#[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm03/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 32, Row: 29
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] device=cuda
+[lns_triton_placer] Phase 0: Analytical warm start...
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=68.3580  wl=0.4901  den=0.034014  alpha=10.0
+  [r0] step  50  loss=0.7710  wl=0.4950  den=0.000199  alpha=13.3
+  [restart 0] cong_100=1.8336 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=2766.7854  wl=0.5476  den=0.096517  alpha=10.0
+  [r1] step  50  loss=174.6549  wl=0.5438  den=0.013221  alpha=13.3
+  [restart 1] cong_100=2.8050 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=1.83)...
+  step  100  loss=2.0424  wl=0.4952  den=0.000289  cong=1.8336  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=1.2424  wl=0.4999  den=0.008556  cong=1.2785  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=0.8694  wl=0.5039  den=0.006454  cong=1.2076  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.8653  wl=0.5067  den=0.006122  cong=1.1852  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] vectorized: converged, 1 passes (0.00s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=1.83)...
+[lns_triton_placer] Warm start done in 5.8s
+[lns_triton_placer] Loading plc oracle for ibm03...
+#[INFO] Reading from /content/macro-place-challenge/external/MacroPlacement/Testcases/ICCAD04/ibm03/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 32, Row: 29
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] Phase 1: LNS (budget=294s, K=20, steps=50)...
+[lns] Initial proxy (analytical): 1.0983
+  [legalize] vectorized: 400 passes (0.87s), 2 residual overlap pairs (refine handles)
+[lns] iter    0  proxy=1.0981  Δ=+0.0003  t=0s  subset_size=20
+  [legalize] vectorized: 400 passes (0.85s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.86s), 2 residual overlap pairs (refine handles)
+[lns] iter    2  proxy=1.0978  Δ=+0.0002  t=13s  subset_size=20
+  [legalize] vectorized: 400 passes (0.85s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+[lns] iter    4  proxy=1.0978  Δ=+0.0000  t=26s  subset_size=20
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.85s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.85s), 2 residual overlap pairs (refine handles)
+[lns] iter    9  proxy=1.0978  Δ=+0.0000  t=57s  subset_size=20
+  [legalize] vectorized: 400 passes (0.82s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.86s), 2 residual overlap pairs (refine handles)
+[lns] iter   11  proxy=1.0976  Δ=+0.0002  t=69s  subset_size=20
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+[lns] iter   12  proxy=1.0975  Δ=+0.0001  t=76s  subset_size=20
+  [legalize] vectorized: 400 passes (0.85s), 2 residual overlap pairs (refine handles)
+[lns] iter   13  proxy=1.0975  Δ=+0.0000  t=82s  subset_size=20
+  [legalize] vectorized: 400 passes (0.84s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.82s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.84s), 2 residual overlap pairs (refine handles)
+[lns] iter   16  proxy=1.0975  Δ=+0.0000  t=102s  subset_size=20
+  [legalize] vectorized: 400 passes (0.87s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.84s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.84s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.85s), 2 residual overlap pairs (refine handles)
+[lns] iter   20  proxy=1.0973  Δ=+0.0002  t=127s  subset_size=20
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+[lns] iter   21  proxy=1.0972  Δ=+0.0001  t=133s  subset_size=20
+  [legalize] vectorized: 400 passes (0.84s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.81s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+[lns] iter   24  proxy=1.0971  Δ=+0.0000  t=152s  subset_size=20
+  [legalize] vectorized: 400 passes (0.82s), 2 residual overlap pairs (refine handles)
+[lns] iter   25  proxy=1.0969  Δ=+0.0002  t=158s  subset_size=20
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.89s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.85s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+[lns] iter   31  proxy=1.0963  Δ=+0.0005  t=195s  subset_size=20
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+[lns] iter   32  proxy=1.0952  Δ=+0.0011  t=202s  subset_size=20
+  [legalize] vectorized: 400 passes (0.85s), 2 residual overlap pairs (refine handles)
+[lns] iter   33  proxy=1.0952  Δ=+0.0000  t=208s  subset_size=20
+  [legalize] vectorized: 400 passes (0.85s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.82s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.88s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.85s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.85s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.84s), 2 residual overlap pairs (refine handles)
+[lns] iter   39  proxy=1.0952  Δ=+0.0000  t=247s  subset_size=20
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.84s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.88s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+[lns] iter   43  proxy=1.0948  Δ=+0.0004  t=272s  subset_size=20
+  [legalize] vectorized: 400 passes (0.82s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.86s), 2 residual overlap pairs (refine handles)
+[lns] iter   45  proxy=1.0948  Δ=+0.0000  t=285s  subset_size=20
+  [legalize] vectorized: 400 passes (0.82s), 2 residual overlap pairs (refine handles)
+[lns] iter   46  proxy=1.0948  Δ=+0.0000  t=292s  subset_size=20
+[lns] Done: 47 iterations in 297.3s  best_proxy=1.0948
+     ibm03    1.0948    0.0953    0.6070    1.3921         0     317.2s      +30.4%
+#[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm04/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 31, Row: 30
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] device=cuda
+[lns_triton_placer] Phase 0: Analytical warm start...
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=82.5668  wl=0.4834  den=0.041775  alpha=10.0
+  [r0] step  50  loss=2.7681  wl=0.4939  den=0.000891  alpha=13.3
+  [restart 0] cong_100=1.7845 → cong_w=0.295  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=2341.0640  wl=0.5280  den=0.156969  alpha=10.0
+  [r1] step  50  loss=361.8383  wl=0.5284  den=0.033486  alpha=13.3
+  [restart 1] cong_100=2.4012 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.295, cong_100=1.78)...
+  step  100  loss=1.9602  wl=0.4996  den=0.001085  cong=1.7845  den_w=0.50  cong_w=0.29  alpha=16.7
+  step  150  loss=1.2691  wl=0.5055  den=0.009474  cong=1.2637  den_w=0.50  cong_w=0.29  alpha=20.0
+  step  200  loss=0.9002  wl=0.5089  den=0.008781  cong=1.2090  den_w=0.50  cong_w=0.29  alpha=23.3
+  step  250  loss=0.8674  wl=0.5117  den=0.008793  cong=1.1915  den_w=0.50  cong_w=0.29  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] vectorized: converged, 1 passes (0.00s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.79, cong_100=1.78)...
+[lns_triton_placer] Warm start done in 5.8s
+[lns_triton_placer] Loading plc oracle for ibm04...
+#[INFO] Reading from /content/macro-place-challenge/external/MacroPlacement/Testcases/ICCAD04/ibm04/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 31, Row: 30
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] Phase 1: LNS (budget=294s, K=20, steps=50)...
+[lns] Initial proxy (analytical): 1.1275
+  [legalize] vectorized: 400 passes (0.84s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.86s), 1 residual overlap pairs (refine handles)
+[lns] iter    1  proxy=1.1275  Δ=+0.0000  t=9s  subset_size=20
+  [legalize] vectorized: 400 passes (0.84s), 1 residual overlap pairs (refine handles)
+[lns] iter    2  proxy=1.1273  Δ=+0.0001  t=16s  subset_size=20
+  [legalize] vectorized: 400 passes (0.84s), 1 residual overlap pairs (refine handles)
+[lns] iter    3  proxy=1.1255  Δ=+0.0018  t=25s  subset_size=20
+  [legalize] vectorized: 400 passes (0.86s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.85s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.87s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.99s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.87s), 1 residual overlap pairs (refine handles)
+[lns] iter    8  proxy=1.1254  Δ=+0.0001  t=64s  subset_size=20
+  [legalize] vectorized: 400 passes (0.87s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.28s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.87s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.85s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.99s), 1 residual overlap pairs (refine handles)
+[lns] iter   13  proxy=1.1254  Δ=+0.0001  t=104s  subset_size=20
+  [legalize] vectorized: 400 passes (0.85s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.86s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.89s), 1 residual overlap pairs (refine handles)
+[lns] iter   16  proxy=1.1252  Δ=+0.0002  t=129s  subset_size=20
+  [legalize] vectorized: 400 passes (0.86s), 1 residual overlap pairs (refine handles)
+[lns] iter   17  proxy=1.1250  Δ=+0.0002  t=137s  subset_size=20
+  [legalize] vectorized: 400 passes (0.94s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.85s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.83s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.24s), 1 residual overlap pairs (refine handles)
+[lns] iter   21  proxy=1.1249  Δ=+0.0000  t=168s  subset_size=20
+  [legalize] vectorized: 400 passes (0.83s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.84s), 1 residual overlap pairs (refine handles)
+[lns] iter   23  proxy=1.1247  Δ=+0.0002  t=185s  subset_size=20
+  [legalize] vectorized: 400 passes (0.88s), 1 residual overlap pairs (refine handles)
+[lns] iter   24  proxy=1.1243  Δ=+0.0004  t=192s  subset_size=20
+  [legalize] vectorized: 400 passes (0.85s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.90s), 1 residual overlap pairs (refine handles)
+[lns] iter   26  proxy=1.1238  Δ=+0.0005  t=209s  subset_size=20
+  [legalize] vectorized: 400 passes (0.86s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.87s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.11s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.85s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.85s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.46s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.96s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.95s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.27s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.86s), 1 residual overlap pairs (refine handles)
+[lns] Done: 37 iterations in 299.5s  best_proxy=1.1238
+     ibm04    1.1238    0.0811    0.6619    1.4234         0     321.5s      +19.7%
+#[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm06/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 31, Row: 28
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] device=cuda
+[lns_triton_placer] Phase 0: Analytical warm start...
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=54.1745  wl=0.5241  den=0.025211  alpha=10.0
+  [r0] step  50  loss=3.9025  wl=0.5322  den=0.001044  alpha=13.3
+  [restart 0] cong_100=2.5318 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=1697.8823  wl=0.5798  den=0.115428  alpha=10.0
+  [r1] step  50  loss=177.3926  wl=0.5754  den=0.007262  alpha=13.3
+  [restart 1] cong_100=4.3681 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=2.53)...
+  step  100  loss=3.5208  wl=0.5357  den=0.001512  cong=2.5318  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=2.5908  wl=0.5424  den=0.012909  cong=1.8131  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=2.6509  wl=0.5469  den=0.012490  cong=1.7304  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=1.8982  wl=0.5505  den=0.011551  cong=1.7091  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] vectorized: 400 passes (0.39s), 11 residual overlap pairs (refine handles)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=2.53)...
+[lns_triton_placer] Warm start done in 6.8s
+[lns_triton_placer] Loading plc oracle for ibm06...
+#[INFO] Reading from /content/macro-place-challenge/external/MacroPlacement/Testcases/ICCAD04/ibm06/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 31, Row: 28
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] Phase 1: LNS (budget=293s, K=20, steps=50)...
+[lns] Initial proxy (analytical): 1.3722
+  [legalize] vectorized: 400 passes (0.39s), 6 residual overlap pairs (refine handles)
+[lns] iter    0  proxy=1.3721  Δ=+0.0001  t=0s  subset_size=20
+  [legalize] vectorized: 400 passes (0.58s), 6 residual overlap pairs (refine handles)
+[lns] iter    1  proxy=1.3719  Δ=+0.0002  t=9s  subset_size=20
+  [legalize] vectorized: 400 passes (0.37s), 6 residual overlap pairs (refine handles)
+[lns] iter    2  proxy=1.3718  Δ=+0.0001  t=18s  subset_size=20
+  [legalize] vectorized: 400 passes (0.38s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.50s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.38s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.39s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.39s), 6 residual overlap pairs (refine handles)
+[lns] iter    7  proxy=1.3717  Δ=+0.0000  t=62s  subset_size=20
+  [legalize] vectorized: 400 passes (0.39s), 6 residual overlap pairs (refine handles)
+[lns] iter    8  proxy=1.3715  Δ=+0.0002  t=70s  subset_size=20
+  [legalize] vectorized: 400 passes (0.42s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.37s), 6 residual overlap pairs (refine handles)
+[lns] iter   10  proxy=1.3715  Δ=+0.0000  t=89s  subset_size=20
+  [legalize] vectorized: 400 passes (0.59s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.39s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.39s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.39s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.39s), 6 residual overlap pairs (refine handles)
+[lns] iter   15  proxy=1.3713  Δ=+0.0001  t=132s  subset_size=20
+  [legalize] vectorized: 400 passes (0.39s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.39s), 6 residual overlap pairs (refine handles)
+[lns] iter   17  proxy=1.3713  Δ=+0.0001  t=151s  subset_size=20
+  [legalize] vectorized: 400 passes (0.40s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.44s), 6 residual overlap pairs (refine handles)
+[lns] iter   19  proxy=1.3713  Δ=+0.0000  t=168s  subset_size=20
+  [legalize] vectorized: 400 passes (0.40s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.61s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.37s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.41s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.40s), 6 residual overlap pairs (refine handles)
+[lns] iter   24  proxy=1.3713  Δ=+0.0000  t=213s  subset_size=20
+  [legalize] vectorized: 400 passes (0.38s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.38s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.38s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.51s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.39s), 6 residual overlap pairs (refine handles)
+[lns] iter   29  proxy=1.3711  Δ=+0.0002  t=257s  subset_size=20
+  [legalize] vectorized: 400 passes (0.38s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.61s), 6 residual overlap pairs (refine handles)
+[lns] iter   31  proxy=1.3711  Δ=+0.0001  t=274s  subset_size=20
+  [legalize] vectorized: 400 passes (0.39s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.39s), 6 residual overlap pairs (refine handles)
+[lns] iter   33  proxy=1.3710  Δ=+0.0000  t=292s  subset_size=20
+[lns] Done: 34 iterations in 300.8s  best_proxy=1.3710
+     ibm06    1.3710    0.0759    0.6739    1.9162         0     326.2s      +40.9%
+#[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm07/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 35, Row: 32
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] device=cuda
+[lns_triton_placer] Phase 0: Analytical warm start...
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=75.6067  wl=0.4922  den=0.057152  alpha=10.0
+  [r0] step  50  loss=1.1361  wl=0.5022  den=0.000610  alpha=13.3
+  [restart 0] cong_100=1.9050 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=3146.5269  wl=0.5440  den=0.163715  alpha=10.0
+  [r1] step  50  loss=102.1453  wl=0.5486  den=0.014227  alpha=13.3
+  [restart 1] cong_100=3.3423 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=1.90)...
+  step  100  loss=1.6426  wl=0.5059  den=0.000837  cong=1.9050  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=1.4506  wl=0.5085  den=0.017693  cong=1.4570  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=0.9279  wl=0.5108  den=0.014787  cong=1.3657  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.9231  wl=0.5131  den=0.014717  cong=1.3421  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] vectorized: converged, 1 passes (0.00s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=1.90)...
+[lns_triton_placer] Warm start done in 7.0s
+[lns_triton_placer] Loading plc oracle for ibm07...
+#[INFO] Reading from /content/macro-place-challenge/external/MacroPlacement/Testcases/ICCAD04/ibm07/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 35, Row: 32
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] Phase 1: LNS (budget=293s, K=20, steps=50)...
+[lns] Initial proxy (analytical): 1.1984
+  [legalize] vectorized: 400 passes (0.83s), 3 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.81s), 3 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.22s), 3 residual overlap pairs (refine handles)
+[lns] iter    2  proxy=1.1984  Δ=+0.0000  t=30s  subset_size=20
+  [legalize] vectorized: 400 passes (0.81s), 3 residual overlap pairs (refine handles)
+[lns] iter    3  proxy=1.1984  Δ=+0.0000  t=45s  subset_size=20
+  [legalize] vectorized: 400 passes (0.81s), 3 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.89s), 3 residual overlap pairs (refine handles)
+[lns] iter    5  proxy=1.1984  Δ=+0.0000  t=74s  subset_size=20
+  [legalize] vectorized: 400 passes (0.84s), 3 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.88s), 3 residual overlap pairs (refine handles)
+[lns] iter    7  proxy=1.1982  Δ=+0.0001  t=103s  subset_size=20
+  [legalize] vectorized: 400 passes (1.03s), 3 residual overlap pairs (refine handles)
+[lns] iter    8  proxy=1.1981  Δ=+0.0001  t=117s  subset_size=20
+  [legalize] vectorized: 400 passes (1.01s), 3 residual overlap pairs (refine handles)
+[lns] iter    9  proxy=1.1981  Δ=+0.0001  t=132s  subset_size=20
+  [legalize] vectorized: 400 passes (0.81s), 3 residual overlap pairs (refine handles)
+[lns] iter   10  proxy=1.1978  Δ=+0.0002  t=147s  subset_size=20
+  [legalize] vectorized: 400 passes (0.82s), 3 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.83s), 2 residual overlap pairs (refine handles)
+[lns] iter   12  proxy=1.1977  Δ=+0.0001  t=176s  subset_size=20
+  [legalize] vectorized: 400 passes (0.82s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.82s), 2 residual overlap pairs (refine handles)
+[lns] iter   14  proxy=1.1975  Δ=+0.0002  t=205s  subset_size=20
+  [legalize] vectorized: 400 passes (1.21s), 2 residual overlap pairs (refine handles)
+[lns] iter   15  proxy=1.1975  Δ=+0.0000  t=219s  subset_size=20
+  [legalize] vectorized: 400 passes (0.82s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.82s), 2 residual overlap pairs (refine handles)
+[lns] iter   17  proxy=1.1974  Δ=+0.0000  t=249s  subset_size=20
+  [legalize] vectorized: 400 passes (0.82s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.81s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.84s), 2 residual overlap pairs (refine handles)
+[lns] iter   20  proxy=1.1974  Δ=+0.0001  t=292s  subset_size=20
+[lns] Done: 21 iterations in 306.5s  best_proxy=1.1974
+     ibm07    1.1974    0.0762    0.6778    1.5647         0     343.8s      +31.7%
+#[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm08/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 38, Row: 34
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] device=cuda
+[lns_triton_placer] Phase 0: Analytical warm start...
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=81.7749  wl=0.4680  den=0.053245  alpha=10.0
+  [r0] step  50  loss=1.6308  wl=0.4791  den=0.001057  alpha=13.3
+  [restart 0] cong_100=2.0062 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=2521.4136  wl=0.5159  den=0.138954  alpha=10.0
+  [r1] step  50  loss=176.3808  wl=0.5207  den=0.021256  alpha=13.3
+  [restart 1] cong_100=3.6730 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=2.01)...
+  step  100  loss=1.3861  wl=0.4841  den=0.002382  cong=2.0062  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=1.1742  wl=0.4890  den=0.014456  cong=1.4953  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=0.9227  wl=0.4919  den=0.014824  cong=1.4113  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.9184  wl=0.4945  den=0.015233  cong=1.3875  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] vectorized: converged, 1 passes (0.00s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=2.01)...
+[lns_triton_placer] Warm start done in 6.1s
+[lns_triton_placer] Loading plc oracle for ibm08...
+#[INFO] Reading from /content/macro-place-challenge/external/MacroPlacement/Testcases/ICCAD04/ibm08/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 38, Row: 34
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] Phase 1: LNS (budget=294s, K=20, steps=50)...
+[lns] Initial proxy (analytical): 1.1971
+  [legalize] vectorized: 400 passes (0.87s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.87s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.23s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.88s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.92s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.31s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.87s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.85s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.11s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.87s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.87s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.88s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.89s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.93s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.86s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.86s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.29s), 5 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.87s), 5 residual overlap pairs (refine handles)
+[lns] Done: 18 iterations in 308.3s  best_proxy=1.1971
+     ibm08    1.1971    0.0764    0.6900    1.5515         0     351.7s      +28.2%
+#[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm09/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 36, Row: 38
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] device=cuda
+[lns_triton_placer] Phase 0: Analytical warm start...
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=91.6177  wl=0.5030  den=0.057498  alpha=10.0
+  [r0] step  50  loss=1.2731  wl=0.5114  den=0.002756  alpha=13.3
+  [restart 0] cong_100=1.2472 → cong_w=0.116  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=3715.7490  wl=0.5575  den=0.214027  alpha=10.0
+  [r1] step  50  loss=407.1298  wl=0.5606  den=0.052186  alpha=13.3
+  [restart 1] cong_100=2.5262 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.116, cong_100=1.25)...
+  step  100  loss=1.1695  wl=0.5149  den=0.002945  cong=1.2472  den_w=0.50  cong_w=0.12  alpha=16.7
+  step  150  loss=0.6382  wl=0.5159  den=0.008785  cong=1.0186  den_w=0.50  cong_w=0.12  alpha=20.0
+  step  200  loss=0.6339  wl=0.5171  den=0.007455  cong=0.9765  den_w=0.50  cong_w=0.12  alpha=23.3
+  step  250  loss=0.6336  wl=0.5184  den=0.007660  cong=0.9627  den_w=0.50  cong_w=0.12  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] vectorized: converged, 1 passes (0.00s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.43, cong_100=1.25)...
+[lns_triton_placer] Warm start done in 6.0s
+[lns_triton_placer] Loading plc oracle for ibm09...
+#[INFO] Reading from /content/macro-place-challenge/external/MacroPlacement/Testcases/ICCAD04/ibm09/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 36, Row: 38
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] Phase 1: LNS (budget=294s, K=20, steps=50)...
+[lns] Initial proxy (analytical): 0.9402
+  [legalize] vectorized: 400 passes (0.64s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.67s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.66s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.65s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.64s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.67s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.66s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.65s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.82s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.97s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.71s), 2 residual overlap pairs (refine handles)
+[lns] iter   10  proxy=0.9402  Δ=+0.0000  t=117s  subset_size=20
+  [legalize] vectorized: 400 passes (0.66s), 2 residual overlap pairs (refine handles)
+[lns] iter   11  proxy=0.9401  Δ=+0.0001  t=129s  subset_size=20
+  [legalize] vectorized: 400 passes (0.64s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.66s), 2 residual overlap pairs (refine handles)
+[lns] iter   13  proxy=0.9400  Δ=+0.0000  t=152s  subset_size=20
+  [legalize] vectorized: 400 passes (0.67s), 2 residual overlap pairs (refine handles)
+[lns] iter   14  proxy=0.9400  Δ=+0.0000  t=164s  subset_size=20
+  [legalize] vectorized: 400 passes (0.65s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.67s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.67s), 2 residual overlap pairs (refine handles)
+[lns] iter   17  proxy=0.9400  Δ=+0.0001  t=199s  subset_size=20
+  [legalize] vectorized: 400 passes (0.66s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.67s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.66s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.67s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.95s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.98s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.67s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (0.67s), 2 residual overlap pairs (refine handles)
+[lns] Done: 26 iterations in 304.1s  best_proxy=0.9400
+     ibm09    0.9400    0.0609    0.6460    1.1121         0     336.0s      +21.8%
+#[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm10/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 55, Row: 41
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] device=cuda
+[lns_triton_placer] Phase 0: Analytical warm start...
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=84.6828  wl=0.4470  den=0.017646  alpha=10.0
+  [r0] step  50  loss=2.8579  wl=0.4478  den=0.000368  alpha=13.3
+  [restart 0] cong_100=1.9086 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=15585.4727  wl=0.4983  den=0.178067  alpha=10.0
+  [r1] step  50  loss=3839.5999  wl=0.4949  den=0.068555  alpha=13.3
+  [restart 1] cong_100=3.7183 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=1.91)...
+  step  100  loss=1.4475  wl=0.4473  den=0.000469  cong=1.9086  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=1.4935  wl=0.4485  den=0.007819  cong=1.4599  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=0.8679  wl=0.4497  den=0.007252  cong=1.3818  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.8622  wl=0.4511  den=0.006723  cong=1.3591  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] vectorized: converged, 1 passes (0.01s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=1.91)...
+[lns_triton_placer] Warm start done in 8.0s
+[lns_triton_placer] Loading plc oracle for ibm10...
+#[INFO] Reading from /content/macro-place-challenge/external/MacroPlacement/Testcases/ICCAD04/ibm10/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 55, Row: 41
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] Phase 1: LNS (budget=292s, K=20, steps=50)...
+[lns] Initial proxy (analytical): 1.1716
+  [legalize] vectorized: 400 passes (6.36s), 10 residual overlap pairs (refine handles)
+[lns] iter    0  proxy=1.1710  Δ=+0.0005  t=0s  subset_size=20
+  [legalize] vectorized: 400 passes (6.42s), 10 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (6.38s), 10 residual overlap pairs (refine handles)
+[lns] iter    2  proxy=1.1710  Δ=+0.0000  t=124s  subset_size=20
+  [legalize] vectorized: 400 passes (6.93s), 10 residual overlap pairs (refine handles)
+[lns] iter    3  proxy=1.1710  Δ=+0.0000  t=184s  subset_size=20
+  [legalize] vectorized: 400 passes (7.21s), 10 residual overlap pairs (refine handles)
+[lns] Done: 5 iterations in 307.0s  best_proxy=1.1710
+     ibm10    1.1710    0.0727    0.6239    1.5726         0     438.1s      +37.3%
+#[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm11/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 39, Row: 45
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] device=cuda
+[lns_triton_placer] Phase 0: Analytical warm start...
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=130.8063  wl=0.4710  den=0.067528  alpha=10.0
+  [r0] step  50  loss=1.1195  wl=0.4810  den=0.000650  alpha=13.3
+  [restart 0] cong_100=1.3456 → cong_w=0.149  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=4964.0068  wl=0.5247  den=0.182548  alpha=10.0
+  [r1] step  50  loss=504.1398  wl=0.5297  den=0.024865  alpha=13.3
+  [restart 1] cong_100=2.5590 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.149, cong_100=1.35)...
+  step  100  loss=0.7778  wl=0.4847  den=0.000661  cong=1.3456  den_w=0.50  cong_w=0.15  alpha=16.7
+  step  150  loss=0.9025  wl=0.4865  den=0.006293  cong=1.0482  den_w=0.50  cong_w=0.15  alpha=20.0
+  step  200  loss=0.6383  wl=0.4877  den=0.006160  cong=0.9938  den_w=0.50  cong_w=0.15  alpha=23.3
+  step  250  loss=0.6379  wl=0.4893  den=0.005542  cong=0.9820  den_w=0.50  cong_w=0.15  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] vectorized: converged, 1 passes (0.00s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.50, cong_100=1.35)...
+[lns_triton_placer] Warm start done in 6.3s
+[lns_triton_placer] Loading plc oracle for ibm11...
+#[INFO] Reading from /content/macro-place-challenge/external/MacroPlacement/Testcases/ICCAD04/ibm11/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 39, Row: 45
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] Phase 1: LNS (budget=294s, K=20, steps=50)...
+[lns] Initial proxy (analytical): 0.9992
+  [legalize] vectorized: 400 passes (1.26s), 1 residual overlap pairs (refine handles)
+[lns] iter    0  proxy=0.9991  Δ=+0.0001  t=0s  subset_size=20
+  [legalize] vectorized: 400 passes (1.30s), 2 residual overlap pairs (refine handles)
+[lns] iter    1  proxy=0.9990  Δ=+0.0001  t=19s  subset_size=20
+  [legalize] vectorized: 400 passes (1.26s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.72s), 2 residual overlap pairs (refine handles)
+[lns] iter    3  proxy=0.9986  Δ=+0.0004  t=56s  subset_size=20
+  [legalize] vectorized: 400 passes (1.29s), 3 residual overlap pairs (refine handles)
+[lns] iter    4  proxy=0.9986  Δ=+0.0000  t=74s  subset_size=20
+  [legalize] vectorized: 400 passes (1.85s), 3 residual overlap pairs (refine handles)
+[lns] iter    5  proxy=0.9985  Δ=+0.0001  t=92s  subset_size=20
+  [legalize] vectorized: 400 passes (1.26s), 3 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.42s), 3 residual overlap pairs (refine handles)
+[lns] iter    7  proxy=0.9982  Δ=+0.0003  t=129s  subset_size=20
+  [legalize] vectorized: 400 passes (1.26s), 3 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.28s), 3 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.28s), 2 residual overlap pairs (refine handles)
+[lns] iter   10  proxy=0.9980  Δ=+0.0001  t=185s  subset_size=20
+  [legalize] vectorized: 400 passes (1.30s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.31s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.29s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.33s), 2 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.29s), 2 residual overlap pairs (refine handles)
+[lns] Done: 16 iterations in 297.4s  best_proxy=0.9980
+     ibm11    0.9980    0.0600    0.6229    1.2532         0     341.3s      +34.6%
+#[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm12/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 47, Row: 47
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] device=cuda
+[lns_triton_placer] Phase 0: Analytical warm start...
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=172.1914  wl=0.5086  den=0.041119  alpha=10.0
+  [r0] step  50  loss=3.2148  wl=0.5149  den=0.000910  alpha=13.3
+  [restart 0] cong_100=2.2715 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=12996.0928  wl=0.5623  den=0.157333  alpha=10.0
+  [r1] step  50  loss=2563.7832  wl=0.5638  den=0.033091  alpha=13.3
+  [restart 1] cong_100=4.7124 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=2.27)...
+  step  100  loss=2.2631  wl=0.5171  den=0.000870  cong=2.2715  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=1.9341  wl=0.5192  den=0.017944  cong=1.7272  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=1.0783  wl=0.5211  den=0.015244  cong=1.6331  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=1.0076  wl=0.5228  den=0.014920  cong=1.5910  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] vectorized: converged, 1 passes (0.00s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=2.27)...
+[lns_triton_placer] Warm start done in 8.0s
+[lns_triton_placer] Loading plc oracle for ibm12...
+#[INFO] Reading from /content/macro-place-challenge/external/MacroPlacement/Testcases/ICCAD04/ibm12/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 47, Row: 47
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] Phase 1: LNS (budget=292s, K=20, steps=50)...
+[lns] Initial proxy (analytical): 1.3490
+  [legalize] vectorized: 400 passes (3.99s), 6 residual overlap pairs (refine handles)
+[lns] iter    0  proxy=1.3487  Δ=+0.0003  t=0s  subset_size=20
+  [legalize] vectorized: 400 passes (3.94s), 6 residual overlap pairs (refine handles)
+[lns] iter    1  proxy=1.3486  Δ=+0.0001  t=62s  subset_size=20
+  [legalize] vectorized: 400 passes (3.98s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (3.90s), 6 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (4.62s), 6 residual overlap pairs (refine handles)
+[lns] Done: 5 iterations in 307.1s  best_proxy=1.3486
+     ibm12    1.3486    0.0670    0.6739    1.8893         0     440.4s      +47.1%
+#[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm13/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 43, Row: 43
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] device=cuda
+[lns_triton_placer] Phase 0: Analytical warm start...
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=158.0225  wl=0.4672  den=0.077865  alpha=10.0
+  [r0] step  50  loss=2.0949  wl=0.4767  den=0.000991  alpha=13.3
+  [restart 0] cong_100=1.5528 → cong_w=0.218  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=3990.0056  wl=0.5218  den=0.223965  alpha=10.0
+  [r1] step  50  loss=376.3068  wl=0.5243  den=0.045215  alpha=13.3
+  [restart 1] cong_100=2.7433 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.218, cong_100=1.55)...
+  step  100  loss=1.2841  wl=0.4806  den=0.000755  cong=1.5528  den_w=0.50  cong_w=0.22  alpha=16.7
+  step  150  loss=1.4786  wl=0.4826  den=0.010481  cong=1.1892  den_w=0.50  cong_w=0.22  alpha=20.0
+  step  200  loss=0.7369  wl=0.4845  den=0.008972  cong=1.1392  den_w=0.50  cong_w=0.22  alpha=23.3
+  step  250  loss=0.7344  wl=0.4864  den=0.008301  cong=1.1209  den_w=0.50  cong_w=0.22  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] vectorized: converged, 1 passes (0.00s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.64, cong_100=1.55)...
+[lns_triton_placer] Warm start done in 6.8s
+[lns_triton_placer] Loading plc oracle for ibm13...
+#[INFO] Reading from /content/macro-place-challenge/external/MacroPlacement/Testcases/ICCAD04/ibm13/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 43, Row: 43
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] Phase 1: LNS (budget=293s, K=20, steps=50)...
+[lns] Initial proxy (analytical): 1.0871
+  [legalize] vectorized: 400 passes (1.65s), 1 residual overlap pairs (refine handles)
+[lns] iter    0  proxy=1.0871  Δ=+0.0000  t=0s  subset_size=20
+  [legalize] vectorized: 400 passes (1.80s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (2.11s), 1 residual overlap pairs (refine handles)
+[lns] iter    2  proxy=1.0871  Δ=+0.0000  t=46s  subset_size=20
+  [legalize] vectorized: 400 passes (1.67s), 1 residual overlap pairs (refine handles)
+[lns] iter    3  proxy=1.0871  Δ=+0.0000  t=70s  subset_size=20
+  [legalize] vectorized: 400 passes (1.62s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.65s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.69s), 1 residual overlap pairs (refine handles)
+[lns] iter    6  proxy=1.0871  Δ=+0.0000  t=140s  subset_size=20
+  [legalize] vectorized: 400 passes (1.63s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.97s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (2.11s), 1 residual overlap pairs (refine handles)
+  [legalize] vectorized: 400 passes (1.64s), 1 residual overlap pairs (refine handles)
+[lns] iter   10  proxy=1.0870  Δ=+0.0001  t=233s  subset_size=20
+  [legalize] vectorized: 400 passes (1.63s), 1 residual overlap pairs (refine handles)
+[lns] iter   11  proxy=1.0865  Δ=+0.0006  t=257s  subset_size=20
+  [legalize] vectorized: 400 passes (1.66s), 1 residual overlap pairs (refine handles)
+[lns] Done: 13 iterations in 304.1s  best_proxy=1.0865
+     ibm13    1.0865    0.0605    0.6533    1.3987         0     359.4s      +39.0%
+#[INFO] Reading from external/MacroPlacement/Testcases/ICCAD04/ibm14/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 49, Row: 44
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] device=cuda
+[lns_triton_placer] Phase 0: Analytical warm start...
+[analytical_placer] device=cuda
+[analytical_placer] Preprocessing benchmark tensors...
+[analytical_placer] Restart 0: Phase 1 (100 steps)...
+  [r0] step   0  loss=162.1366  wl=0.5078  den=0.114353  alpha=10.0
+  [r0] step  50  loss=5.0282  wl=0.5181  den=0.001868  alpha=13.3
+  [restart 0] cong_100=1.9395 → cong_w=0.300  *** NEW BEST
+[analytical_placer] Restart 1: Phase 1 (100 steps)...
+  [r1] step   0  loss=4325.5298  wl=0.5592  den=0.198886  alpha=10.0
+  [r1] step  50  loss=359.0496  wl=0.5632  den=0.005515  alpha=13.3
+  [restart 1] cong_100=4.0476 → cong_w=0.300
+[analytical_placer] Phase 2 (200 steps, cong_w=0.300, cong_100=1.94)...
+  step  100  loss=2.1300  wl=0.5228  den=0.001084  cong=1.9395  den_w=0.50  cong_w=0.30  alpha=16.7
+  step  150  loss=1.3086  wl=0.5252  den=0.014700  cong=1.4834  den_w=0.50  cong_w=0.30  alpha=20.0
+  step  200  loss=1.1560  wl=0.5267  den=0.011850  cong=1.4184  den_w=0.50  cong_w=0.30  alpha=23.3
+  step  250  loss=0.9522  wl=0.5281  den=0.010806  cong=1.3960  den_w=0.50  cong_w=0.30  alpha=26.7
+[analytical_placer] Legalizing hard macros...
+  [legalize] vectorized: converged, 1 passes (0.00s)
+[analytical_placer] Post-legalize refine round 1 (40 steps, cong_w=0.50)...
+[analytical_placer] Post-legalize refine round 2 (60 steps, cong_w=0.80, cong_100=1.94)...
+[lns_triton_placer] Warm start done in 8.3s
+[lns_triton_placer] Loading plc oracle for ibm14...
+#[INFO] Reading from /content/macro-place-challenge/external/MacroPlacement/Testcases/ICCAD04/ibm14/netlist.pb.txt
+[INFO] Retrieving Meta information from .plc comments
+#[PLACEMENT GRID] Col: 49, Row: 44
+#[ROUTES PER MICRON] Hor: 65.96, Ver: 106.96
+#[CONGESTION SMOOTH RANGE] Smooth Range: 2
+#[OVERLAP THRESHOLD] Threshold: 0.0040
+[lns_triton_placer] Phase 1: LNS (budget=292s, K=20, steps=50)...
+[lns] Initial proxy (analytical): 1.3161
+  [legalize] vectorized: 400 passes (3.52s), 7 residual overlap pairs (refine handles)
+[lns] iter    0  proxy=1.3158  Δ=+0.0003  t=0s  subset_size=20
+  [legalize] vectorized: 400 passes (3.52s), 7 residual overlap pairs (refine handles)
