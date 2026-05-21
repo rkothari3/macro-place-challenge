@@ -151,9 +151,9 @@ def compute_proxy_cost(
     _set_placement(plc, placement, benchmark)
 
     # Compute costs using PlacementCost methods
-    wirelength_cost = plc.get_cost()
-    density_cost = plc.get_density_cost()
-    congestion_cost = plc.get_congestion_cost()  # Fixed with monkey-patch above
+    wirelength_cost = float(plc.get_cost())
+    density_cost = float(plc.get_density_cost())
+    congestion_cost = float(plc.get_congestion_cost())  # Fixed with monkey-patch above
 
     # Weighted sum (matching ISPD 2023 paper convention)
     proxy = (
