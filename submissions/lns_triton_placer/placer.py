@@ -559,8 +559,6 @@ def lns_refine(
     iteration      = 0
     ovl_rejected   = 0   # iterations skipped by overlap guard
     scores         = None   # cached per-macro congestion scores; invalidated on improvement
-    current_steps  = inner_steps
-    TARGET_ITER_S  = 20.0   # target wall-clock seconds per LNS iteration
 
     while True:
         elapsed = time.time() - t_start
@@ -583,21 +581,10 @@ def lns_refine(
             subset = _select_neighborhood(scores, movable_idx, k=k_neighborhood)
 
         # Gradient refine subset
-        t_iter = time.time()
         candidate = _gradient_refine_subset(
             best_pos, subset, b, data, device,
-            steps=current_steps, cong_w=cong_w,
+            steps=inner_steps, cong_w=cong_w,
         )
-
-        # After first iteration, calibrate steps to hit TARGET_ITER_S/iter
-        if iteration == 0:
-            t_iter_elapsed = time.time() - t_iter
-            if t_iter_elapsed > 0:
-                calibrated = round(current_steps * TARGET_ITER_S / t_iter_elapsed)
-                current_steps = max(10, min(inner_steps, calibrated))
-                if current_steps != inner_steps:
-                    print(f"[lns] Calibrated inner_steps: {inner_steps}→{current_steps} "
-                          f"(first iter took {t_iter_elapsed:.1f}s, target={TARGET_ITER_S:.0f}s)")
 
         # Legalize — LNS candidates start from already-legal best_pos with only K=20
         # macros displaced, so 100 passes is sufficient to clear residual overlaps.
