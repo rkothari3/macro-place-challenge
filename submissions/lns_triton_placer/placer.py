@@ -695,18 +695,4 @@ class LNSTritonPlacer:
             use_peak_reduction=self.use_peak_reduction,
         )
 
-        # ---- Phase 2: post-LNS gradient refinement ----
-        # After many LNS iterations moving hard macros, soft macros have drifted.
-        # Run two rounds of gradient refinement (same as analytical placer) to
-        # tighten WL + congestion + density with soft macros included.
-        with torch.no_grad():
-            _pin_xy = _compute_pin_xy(best_pos.to(device), data, b, b.port_positions.to(device))
-            cong_lns = lroute_congestion_loss_triton(_pin_xy, data, b, device,
-                                                     pos=best_pos.to(device),
-                                                     sizes=b.macro_sizes.to(device)).item()
-        cong_w2 = min(0.8, max(0.4, 0.4 + 0.4 * (cong_lns - 1.2) / 0.6))
-        print(f"[lns_triton_placer] Phase 2: post-LNS refinement (cong={cong_lns:.2f}, cong_w2={cong_w2:.2f})...")
-        best_pos = _post_legalize_refine(best_pos, b, data, device, steps=40, cong_w=0.50)
-        best_pos = _post_legalize_refine(best_pos, b, data, device, steps=60, cong_w=cong_w2)
-
         return best_pos
