@@ -2,10 +2,10 @@
 LNS + Triton Placer
 
 Strategy:
-  Phase 0  Analytical warm start (existing analytical placer, ~23s)
+  Phase 0  Analytical warm start (existing analytical placer, best-of-3)
   Phase 1  Large-Neighborhood Search using TRUE proxy oracle (no surrogate gap)
            - Congestion-guided neighborhood selection (top-K hot macros + random)
-           - 50-step gradient descent on selected subset (Triton-accelerated lroute)
+           - 30-step gradient descent on selected subset (Triton-accelerated lroute)
            - True proxy evaluation via plc C++ oracle
            - Strict descent acceptance
 
@@ -95,9 +95,9 @@ def _load_plc(b: Benchmark):
 def _true_proxy(pos: torch.Tensor, b: Benchmark, plc) -> float:
     """Evaluate true proxy cost. pos must be on CPU."""
     _set_placement(plc, pos.cpu(), b)
-    wl   = plc.get_cost()
-    den  = plc.get_density_cost()
-    cong = plc.get_congestion_cost()
+    wl   = float(plc.get_cost())
+    den  = float(plc.get_density_cost())
+    cong = float(plc.get_congestion_cost())
     return wl + 0.5 * den + 0.5 * cong
 
 
@@ -412,12 +412,8 @@ def _select_neighborhood_by_peak_reduction(
     k = min(k, len(movable))
 
     if len(movable) <= budget:
-        # Evaluate all
         candidates = movable_idx.tolist()
     else:
-        # Sample: frac_hot from top congestion scores, rest random
-        scores = torch.zeros(len(movable))
-        mov_scores = torch.tensor([0.0] * len(movable))  # placeholder
         candidates = movable_idx[torch.randperm(len(movable_idx))[:budget]].tolist()
 
     peak_reductions = []
@@ -586,7 +582,7 @@ def lns_refine(
             steps=inner_steps, cong_w=cong_w,
         )
 
-        # Legalize — LNS candidates start from already-legal best_pos with only K=20
+        # Legalize — LNS candidates start from already-legal best_pos with only K=30
         # macros displaced, so 100 passes is sufficient to clear residual overlaps.
         # (Initial warm start uses 400 passes; reducing here saves ~0.35s/iteration.)
         candidate = _legalize(candidate, b, time_budget_s=5.0, max_passes=100, verbose=False)
@@ -640,8 +636,8 @@ class LNSTritonPlacer:
     def __init__(self, use_peak_reduction: bool = True):
         """
         Args:
-            use_peak_reduction: if True, use peak-congestion-aware neighborhood selection.
-                               if False, use fast congestion-score-based selection (original).
+            use_peak_reduction: if True, use peak-congestion-aware neighborhood selection;
+                               if False, use congestion-score-based selection.
         """
         self.use_peak_reduction = use_peak_reduction
 
