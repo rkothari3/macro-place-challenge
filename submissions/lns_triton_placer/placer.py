@@ -689,8 +689,8 @@ class LNSTritonPlacer:
         best_pos = lns_refine(
             warm_pos, b, plc, data, device,
             time_budget=lns_budget,
-            k_neighborhood=20,
-            inner_steps=30,   # reduced from 50 → more iterations in same budget
+            k_neighborhood=30,
+            inner_steps=30,
             no_improve_limit=50,
             use_peak_reduction=self.use_peak_reduction,
         )
