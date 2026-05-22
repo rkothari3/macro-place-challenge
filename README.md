@@ -2,10 +2,6 @@
 
 <img src="assets/HRT.png" alt="Hudson River Trading" height="80"> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <img src="assets/partcl.png" alt="Partcl" height="80">
 
-**Win $20,000 by developing better macro placement algorithms!**
-
-Partcl and Hudson River Trading are excited to co-host a competition to solve the macro placement problem. 
-
 ## About Macro Placement
 
 Macro placement is the problem of positioning large fixed-size blocks (SRAMs, IPs, analog macros, etc.) on a chip floorplan so that routing congestion, timing, power delivery, and area constraints are balanced. Unlike standard-cell placement, macros have strong geometric and connectivity constraints, so the challenge is to explore a highly discrete design space while minimizing wirelength, avoiding blockages, and preserving downstream routability and timing quality.
@@ -16,8 +12,7 @@ For example, the **ibm01** benchmark has:
 - **A 22.9 × 23.0 μm canvas** with 42.8% area utilization
 
 <p align="center">
-  <img src="assets/sa_ibm01.gif" alt="Simulated annealing on ibm01" width="600"><br>
-  <img src="assets/fd_ibm01.gif" alt="Force-directed placement on ibm01" width="600">
+  <img src="assets/lns_ibm01.gif" alt="LNS-Triton on ibm01" width="600">
 </p>
 
 ## About HRT Hardware
