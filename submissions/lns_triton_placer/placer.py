@@ -681,8 +681,8 @@ class LNSTritonPlacer:
         print(f"[lns_triton_placer] Best warm start: proxy={warm_proxy:.4f}  ({t_analytical:.1f}s)")
 
         # ---- Phase 1: LNS refinement ----
-        # Reserve 300s for warm start overhead + 120s buffer; rest is LNS budget
-        TOTAL_BUDGET = 1800.0   # 30 minutes
+        # Reserve 120s buffer for overhead; rest is LNS budget
+        TOTAL_BUDGET = 2200.0   # ~35 minutes
         lns_budget   = max(60.0, TOTAL_BUDGET - t_analytical - 120.0)
         print(f"[lns_triton_placer] Phase 1: LNS refinement (budget={lns_budget:.0f}s)...")
 
